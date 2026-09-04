@@ -1,2 +1,3 @@
 # Ostinato
-A terminal sequencer written in Rust.
+
+Ostinato (`osti`) is a terminal user interface (TUI) for composing music, but keyboard-driven and modal.
