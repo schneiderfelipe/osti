@@ -62,7 +62,9 @@ Ostinato should not be tailored to one genre, and separately, it should not be t
 An unfamiliar or half-remembered keybinding should be discoverable inside the session, not by leaving it to check a reference.
 The command line's completion should double as live documentation of what's available, and a which-key-style popup for partially-typed key sequences should exist from early on.
 
-## Helix (and Kakoune) lineage
+## Helix, Kakoune, and Neovim lineage
 
-Ostinato borrows its editing philosophy from Helix (and Kakoune) (selection-first, noun before verb) wherever that philosophy applies cleanly to notes and time instead of characters and lines.
+Ostinato borrows its editing philosophy from Helix (selection-first, noun before verb) wherever that philosophy applies cleanly to notes and time instead of characters and lines.
+Helix is itself a synthesis: Kakoune's selection model filtered through Vim and Neovim's modal-editing and command-line heritage.
+Ostinato draws on Kakoune and Neovim the same way Helix does (through that synthesis, not as separate influences to reconcile on its own).
 But self-consistency inside Ostinato's own domain wins whenever the analogy strains.
