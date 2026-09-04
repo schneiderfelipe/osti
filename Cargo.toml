@@ -18,15 +18,10 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-# `perf` is already part of `all`; named explicitly so the performance bar is a stated decision,
-# not an accident of `all`'s composition.
-perf = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
 cargo = { level = "warn", priority = -1 }
 unwrap_used = "warn"
 expect_used = "warn"
 panic = "warn"
-# Transitive dependencies of ratatui/crossterm/cpal pull in a few duplicate versions of common
-# crates (thiserror, bitflags, hashbrown, ...); that's upstream's call, not ours to fix here.
 multiple_crate_versions = "allow"
