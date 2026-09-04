@@ -2,6 +2,9 @@
 
 This roadmap sketches where Ostinato is headed, starting from the pitch in [README.md](README.md) and the design goals in [DESIGN.md](DESIGN.md).
 
+Each checklist item below is scoped to a single pull request: concrete and demoable, but silent on how it's implemented.
+PRs are expected to check off, split, reorder, or rewrite items here as work proceeds (this file tracks progress, it isn't a frozen spec).
+
 ## Vision
 
 Ostinato is a terminal, keyboard-driven, modal tool for composing music: a sequencer with looper features, good at writing note patterns, looping them, and playing them back on simple synthesized instruments.
@@ -12,51 +15,58 @@ This document describes what "done" looks like for a first, minimal version of O
 
 ## MVP
 
+### Foundation
+
+- [ ] Set up the project skeleton: an empty terminal UI and an audio loop, wired together and running
+- [ ] Play a single note back in a loop, audibly and visibly, confirming UI and audio stay in sync
+
 ### Composing
 
-Modal, keyboard-driven editing of note patterns on a grid that shows notes and time, selection-first and noun-before-verb wherever that fits notes and time instead of characters and lines.
+- [ ] Show a grid of notes and time for one pattern
+- [ ] Move a selection around the grid
+- [ ] Add and remove notes at the current selection
+- [ ] Change a selected note's pitch and duration
+- [ ] Select and edit more than one note at once
 
 ### Tracks
 
-A handful of tracks, each holding its own pattern, can be opened, switched between, and played together as a small arrangement.
+- [ ] Hold more than one pattern at a time, each on its own track
+- [ ] Switch which track is being edited
+- [ ] Play all tracks together, in sync
 
 ### Playback and looping
 
-Every track loops and plays back in real time, audibly and visibly in sync with the grid; transport (play, pause, seek) is always a few keystrokes away.
+- [ ] Play, pause, and seek without leaving the keyboard
+- [ ] Loop a pattern continuously
+- [ ] Change where a loop starts and ends
 
 ### Instruments
 
-A small set of simple, synthesized instruments covers common sounds without tying Ostinato to one genre or one synthesis approach.
+- [ ] Play notes through one simple synthesized instrument
+- [ ] Choose which instrument a track uses
+- [ ] Add a second, differently-voiced instrument
 
 ### Command line
 
-A single command line handles non-editing operations (opening a track, loading, and saving a composition) with completion that doubles as live documentation of what's available.
+- [ ] Open a command line for non-editing operations
+- [ ] Save a composition to a file
+- [ ] Load a composition from a file
+- [ ] Open a specific track by name
+- [ ] Show completions for available commands
 
 ### Undo
 
-Every edit, typed or generated, feeds one action stream, so undo is a replay of that stream rather than a separate mechanism.
+- [ ] Undo the most recent edit
+- [ ] Redo an undone edit
+- [ ] Undo and redo across a run of edits
 
 ## Beyond MVP
 
-### Macros
-
-Recording and replaying stretches of the same action stream that backs undo.
-
-### Which-key guidance
-
-A popup that shows the keys available for a partially-typed sequence, so an unfamiliar or half-remembered binding is discoverable in the moment.
-
-### Non-interactive rendering
-
-Rendering a composition to an audio file from the command line, without opening the interactive session.
-
-### Deeper sound and mixing
-
-Expanded sound-shaping and mixing controls, kept secondary to the core work of writing and looping patterns.
-
-### Handing off to specialized tools
-
-Making it easy to send work to an existing, specialized tool instead of reimplementing that tool's job inside Ostinato.
+- [ ] Macros: record and replay a stretch of edits
+- [ ] Which-key guidance: show the keys available for a partially-typed sequence
+- [ ] Non-interactive rendering: render a composition to an audio file from the command line
+- [ ] Deeper sound and mixing, kept secondary to writing and looping patterns
+- [ ] Handing off to specialized tools instead of reimplementing their job
 
 ## Non-goals
 
