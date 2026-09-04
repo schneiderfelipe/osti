@@ -6,7 +6,7 @@ use osti_tui::DefaultTerminal;
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let audio_loop = osti_audio::play_silence()
+    let audio_loop = osti_audio::play_looping_note()
         .inspect_err(|err| eprintln!("audio: {err}, continuing without sound"))
         .ok();
 
