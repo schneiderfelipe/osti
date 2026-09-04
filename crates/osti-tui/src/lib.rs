@@ -1,8 +1,7 @@
 //! Terminal UI for osti.
 //!
-//! This crate owns everything about talking to the terminal: entering and leaving the
-//! alternate screen, reading input, and rendering. Rendering is kept decoupled from a real
-//! terminal so it can be exercised with [`ratatui::backend::TestBackend`] in tests instead.
+//! Owns talking to the terminal: entering and leaving the alternate screen, reading input, and
+//! rendering.
 
 use std::io;
 
@@ -10,35 +9,28 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 pub use ratatui::DefaultTerminal;
 use ratatui::Frame;
 
-/// Initializes the terminal for interactive use: raw mode and the alternate screen buffer, with
-/// a panic hook installed so the terminal is restored even if the program panics.
+/// Initialize the terminal for interactive use, installing a panic hook that restores it.
 ///
 /// # Errors
 ///
-/// Returns an error if the terminal could not be initialized, for example because there is no
-/// controlling terminal at all.
+/// Returns an error if the terminal could not be initialized.
 pub fn init() -> io::Result<DefaultTerminal> {
     ratatui::try_init()
 }
 
-/// Restores the terminal to its original state: raw mode disabled, alternate screen left.
+/// Restore the terminal to its original state.
 ///
-/// Any failure is reported to stderr rather than returned or panicked on — there is generally
-/// nothing more useful to do while already exiting.
+/// Any failure is reported to stderr rather than returned or panicked on.
 pub fn restore() {
     ratatui::restore();
 }
 
-/// Draws a single, empty frame.
-///
-/// This is the whole UI for now, since there's nothing to compose yet. It exists as the seam
-/// later rendering will grow from, and so the render loop has something real to call.
+/// Draw a single, empty frame: there is nothing to compose yet.
 // Real rendering is coming; `const fn` would just have to be undone.
 #[allow(clippy::missing_const_for_fn)]
 pub fn render(_frame: &mut Frame<'_>) {}
 
-/// Blocks until the next key is pressed, ignoring every other terminal event (resizes, mouse
-/// events, key releases and repeats, ...).
+/// Block until the next key is pressed, ignoring every other terminal event.
 ///
 /// # Errors
 ///
@@ -53,10 +45,9 @@ pub fn next_key_press() -> io::Result<KeyEvent> {
     }
 }
 
-/// Returns whether the given key event should quit the application.
+/// Return whether the given key event should quit the application.
 ///
-/// This is a placeholder: there is no command mode yet to bind a real quit command to, so
-/// `Esc` and `Ctrl-C` both quit directly.
+/// Currently `Esc` and `Ctrl-C` both quit.
 #[must_use]
 pub fn is_quit(key: KeyEvent) -> bool {
     key.code == KeyCode::Esc
