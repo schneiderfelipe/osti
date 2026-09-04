@@ -1,21 +1,31 @@
 //! Audio I/O for osti.
 //!
-//! This crate owns talking to the audio device. The buffer-filling logic that decides what to
-//! play is a small, pure function kept separate from the cpal glue that wires it into a real
-//! output stream, so it can be unit tested with no audio device present.
+//! Owns talking to the audio device.
 
 use std::fmt;
 
 use cpal::{
-    Sample, SampleFormat, Stream,
+    Sample, SampleFormat, SizedSample, Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
 
-/// Fills a buffer with silence: every sample is set to its format's equilibrium value.
-pub fn fill_silence<T: Sample>(data: &mut [T]) {
+// Fill a buffer with silence: set every sample to its format's equilibrium value.
+fn fill_silence<T: Sample>(data: &mut [T]) {
     for sample in data.iter_mut() {
         *sample = T::EQUILIBRIUM;
     }
+}
+
+// Build and start a silent output stream using sample type `T`.
+fn build_and_play<T: SizedSample>(
+    device: &cpal::Device,
+    config: cpal::StreamConfig,
+) -> Result<Stream, cpal::Error> {
+    let err_fn = |err| eprintln!("audio stream error: {err}");
+    let stream =
+        device.build_output_stream(config, |data: &mut [T], _| fill_silence(data), err_fn, None)?;
+    stream.play()?;
+    Ok(stream)
 }
 
 /// A continuously looping silent audio stream.
@@ -49,14 +59,12 @@ pub enum Error {
     Cpal(#[from] cpal::Error),
 }
 
-/// Starts playing silence on the system's default output device, in a loop, for as long as the
-/// returned [`SilentLoop`] is kept alive.
+/// Start a looping silent output stream on the default device.
 ///
 /// # Errors
 ///
-/// Returns an error if there is no default output device, its configuration cannot be read, or
-/// the stream cannot be built or started. A missing output device is common in headless or
-/// sandboxed environments and should be reported rather than treated as fatal.
+/// Returns an error if there is no default output device, or the stream cannot be configured,
+/// built, or started.
 pub fn play_silence() -> Result<SilentLoop, Error> {
     let device = cpal::default_host()
         .default_output_device()
@@ -65,31 +73,12 @@ pub fn play_silence() -> Result<SilentLoop, Error> {
     let sample_format = supported_config.sample_format();
     let config = supported_config.into();
 
-    let err_fn = |err| eprintln!("audio stream error: {err}");
-
     let stream = match sample_format {
-        SampleFormat::F32 => device.build_output_stream(
-            config,
-            |data: &mut [f32], _| fill_silence(data),
-            err_fn,
-            None,
-        ),
-        SampleFormat::I16 => device.build_output_stream(
-            config,
-            |data: &mut [i16], _| fill_silence(data),
-            err_fn,
-            None,
-        ),
-        SampleFormat::U16 => device.build_output_stream(
-            config,
-            |data: &mut [u16], _| fill_silence(data),
-            err_fn,
-            None,
-        ),
+        SampleFormat::F32 => build_and_play::<f32>(&device, config),
+        SampleFormat::I16 => build_and_play::<i16>(&device, config),
+        SampleFormat::U16 => build_and_play::<u16>(&device, config),
         other => return Err(Error::UnsupportedSampleFormat(other)),
     }?;
-
-    stream.play()?;
 
     Ok(SilentLoop { _stream: stream })
 }
