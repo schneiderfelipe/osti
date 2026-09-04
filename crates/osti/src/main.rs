@@ -1,4 +1,4 @@
-//! osti: a terminal, keyboard-driven, modal tool for composing music.
+//! `osti`: a terminal, keyboard-driven, modal tool for composing music.
 
 use color_eyre::Result;
 use osti_tui::DefaultTerminal;

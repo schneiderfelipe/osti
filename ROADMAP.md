@@ -1,17 +1,17 @@
-# osti roadmap
+# `osti` roadmap
 
-This roadmap sketches where osti is headed, starting from the pitch in [README.md](README.md) and the design goals in [DESIGN.md](DESIGN.md).
+This roadmap sketches where `osti` is headed, starting from the pitch in [README.md](README.md) and the design goals in [DESIGN.md](DESIGN.md).
 
 Each checklist item below is scoped to a single pull request: concrete and demoable, but silent on how it's implemented.
 PRs are expected to check off, split, reorder, or rewrite items here as work proceeds (this file tracks progress, it isn't a frozen spec).
 
 ## Vision
 
-osti is a terminal, keyboard-driven, modal tool for composing music: a sequencer with looper features, good at writing note patterns, looping them, and playing them back on simple synthesized instruments.
+`osti` is a terminal, keyboard-driven, modal tool for composing music: a sequencer with looper features, good at writing note patterns, looping them, and playing them back on simple synthesized instruments.
 
 Its editing philosophy follows Helix's lineage (selection-first, noun before verb) and, through Helix, Kakoune's selection model and Neovim's modal-editing and command-line heritage (see [DESIGN.md § Helix, Kakoune, and Neovim lineage](DESIGN.md#helix-kakoune-and-neovim-lineage)).
 
-This document describes what "done" looks like for a first, minimal version of osti (the MVP) and what comes after it.
+This document describes what "done" looks like for a first, minimal version of `osti` (the MVP) and what comes after it.
 
 ## MVP
 

@@ -1,4 +1,4 @@
-//! Audio I/O for osti.
+//! Audio I/O for `osti`.
 //!
 //! Owns talking to the audio device.
 

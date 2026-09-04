@@ -1,4 +1,4 @@
-//! Terminal UI for osti.
+//! Terminal UI for `osti`.
 //!
 //! Owns talking to the terminal: entering and leaving the alternate screen, reading input, and
 //! rendering.
