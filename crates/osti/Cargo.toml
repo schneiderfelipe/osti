@@ -13,3 +13,5 @@ categories.workspace = true
 workspace = true
 
 [dependencies]
+osti-audio = { path = "../osti-audio" }
+osti-tui = { path = "../osti-tui" }

@@ -1048,6 +1048,10 @@ dependencies = [
 [[package]]
 name = "osti"
 version = "0.1.0"
+dependencies = [
+ "osti-audio",
+ "osti-tui",
+]
 
 [[package]]
 name = "osti-audio"
