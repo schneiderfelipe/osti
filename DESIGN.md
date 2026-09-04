@@ -1,23 +1,23 @@
-# Ostinato design
+# `osti` design
 
-This document describes the design goals for Ostinato, including rationale.
+This document describes the design goals for `osti`, including rationale.
 It's heavily inspired by [Kakoune's](https://github.com/mawww/kakoune/blob/master/doc/design.asciidoc).
 
 ## Interactivity
 
-Ostinato is always expected to be used interactively: the loop audibly playing and the grid visibly reflecting every edit in real time is the entire premise of the tool.
-This should not prevent Ostinato from being used non-interactively (e.g., rendering a composition to an audio file from the command line) but interactive, in-the-moment editing is what the design is built around first.
+`osti` is always expected to be used interactively: the loop audibly playing and the grid visibly reflecting every edit in real time is the entire premise of the tool.
+This should not prevent `osti` from being used non-interactively (e.g., rendering a composition to an audio file from the command line) but interactive, in-the-moment editing is what the design is built around first.
 
 ## Limited scope
 
-Ostinato is a sequencer with looper features.
+`osti` is a sequencer with looper features.
 It should be very good at writing note patterns, looping them, and playing simple synthesized instruments over them.
 Being merely adequate at deep sound design or professional mixing is an acceptable trade for staying sharp at that core job.
 
 ## Composability
 
-Ostinato should not try to own everything a serious music setup needs.
-Where an existing, specialized tool already does a job well, Ostinato should make it easy to hand off to that tool instead of reimplementing it.
+`osti` should not try to own everything a serious music setup needs.
+Where an existing, specialized tool already does a job well, `osti` should make it easy to hand off to that tool instead of reimplementing it.
 
 ## Orthogonality
 
@@ -28,7 +28,7 @@ Commands should not be redundant with each other.
 
 ## Speed
 
-Ostinato should be fast to use (a handful of keystrokes for common tasks like chord entry, transpose, or toggling the loop, not many) and fast to execute.
+`osti` should be fast to use (a handful of keystrokes for common tasks like chord entry, transpose, or toggling the loop, not many) and fast to execute.
 The one hard real-time constraint the whole design turns on: the audio thread must never miss a deadline, regardless of what the terminal UI is doing at that moment.
 That asymmetry should decide any tradeoff between UI responsiveness and audio stability in the audio thread's favor, always.
 
@@ -43,7 +43,7 @@ It makes the system easier to reason about, bugs easier to find, and the codebas
 - **No embedded scripting language.**
   The command line covers what a scripting language would otherwise be reached for.
 - **Limited smartness.**
-  Where Ostinato tries to be smart, it should offer a plain, non-smart alternative.
+  Where `osti` tries to be smart, it should offer a plain, non-smart alternative.
   Smart behavior should never be the only path.
 
 ## Unified interactive use and scripting
@@ -55,7 +55,7 @@ That single action stream is what makes undo and macros just a recording of ordi
 
 ## Instrument-agnostic
 
-Ostinato should not be tailored to one genre, and separately, it should not be tailored to one synthesis approach.
+`osti` should not be tailored to one genre, and separately, it should not be tailored to one synthesis approach.
 
 ## Self-documenting
 
@@ -64,7 +64,7 @@ The command line's completion should double as live documentation of what's avai
 
 ## Helix, Kakoune, and Neovim lineage
 
-Ostinato borrows its editing philosophy from Helix (selection-first, noun before verb) wherever that philosophy applies cleanly to notes and time instead of characters and lines.
+`osti` borrows its editing philosophy from Helix (selection-first, noun before verb) wherever that philosophy applies cleanly to notes and time instead of characters and lines.
 Helix is itself a synthesis: Kakoune's selection model filtered through Vim and Neovim's modal-editing and command-line heritage.
-Ostinato draws on Kakoune and Neovim the same way Helix does (through that synthesis, not as separate influences to reconcile on its own).
-But self-consistency inside Ostinato's own domain wins whenever the analogy strains.
+`osti` draws on Kakoune and Neovim the same way Helix does (through that synthesis, not as separate influences to reconcile on its own).
+But self-consistency inside `osti`'s own domain wins whenever the analogy strains.

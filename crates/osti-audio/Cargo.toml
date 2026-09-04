@@ -1,0 +1,17 @@
+[package]
+name = "osti-audio"
+description = "Audio I/O for osti"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cpal = "0.18.2"
+thiserror = "2.0.20"

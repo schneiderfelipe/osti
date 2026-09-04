@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+echo "pre-commit: cargo fmt --check"
+cargo fmt --check
+
+echo "pre-commit: cargo clippy"
+cargo clippy --workspace --all-targets -- -D warnings
+
+echo "pre-commit: cargo test"
+cargo test --workspace
+
+echo "pre-commit: cargo doc"
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+
+echo "pre-commit: cargo machete"
+cargo machete
