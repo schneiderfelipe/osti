@@ -6,6 +6,9 @@ See [DESIGN.md](DESIGN.md) for the design goals and rationale, and [ROADMAP.md](
 
 ## Developing
 
+On Linux, cpal's ALSA backend needs ALSA's development headers to build (`libasound2-dev` on
+Debian/Ubuntu, `alsa-lib-devel` on Fedora, `alsa-lib` on Arch).
+
 ```sh
 cargo run
 ```
