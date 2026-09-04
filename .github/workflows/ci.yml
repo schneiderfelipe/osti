@@ -14,8 +14,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # cpal's ALSA backend needs ALSA's dev headers to build on Linux; the runner doesn't
-      # ship them by default.
       - run: sudo apt-get update && sudo apt-get install --no-install-recommends -y libasound2-dev
 
       - uses: dtolnay/rust-toolchain@stable
@@ -31,8 +29,6 @@ jobs:
       - run: cargo fmt --check
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - run: cargo build --workspace
 
       - run: cargo test --workspace
 

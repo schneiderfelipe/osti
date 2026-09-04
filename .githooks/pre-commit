@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Mirrors CI (.github/workflows/ci.yml), minus the plain `cargo build`: a clean `cargo clippy`
-# run already proves the workspace builds, so a separate build step here would be redundant.
-#
-# Measured on this workspace: every check below runs in well under a second once dependencies
-# are already compiled (which happens once, not per commit). If the workspace grows enough that
-# this stops being true, trim this list back down to fmt + machete and lean on CI for the rest.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
