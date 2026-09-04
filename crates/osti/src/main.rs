@@ -1,10 +1,11 @@
 //! osti: a terminal, keyboard-driven, modal tool for composing music.
 
-use std::io;
-
+use color_eyre::Result;
 use osti_tui::DefaultTerminal;
 
-fn main() -> io::Result<()> {
+fn main() -> Result<()> {
+    color_eyre::install()?;
+
     let audio_loop = osti_audio::play_silence()
         .inspect_err(|err| eprintln!("audio: {err}, continuing without sound"))
         .ok();
@@ -17,8 +18,8 @@ fn main() -> io::Result<()> {
     result
 }
 
-/// Runs the render/input loop until the user quits.
-fn run(terminal: &mut DefaultTerminal) -> io::Result<()> {
+/// Run the render/input loop until the user quits.
+fn run(terminal: &mut DefaultTerminal) -> Result<()> {
     loop {
         terminal.draw(osti_tui::render)?;
 
