@@ -1131,7 +1131,7 @@ dependencies = [
 
 [[package]]
 name = "osti"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "color-eyre",
  "osti-audio",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "osti-audio"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cpal",
  "thiserror 2.0.20",
@@ -1148,7 +1148,7 @@ dependencies = [
 
 [[package]]
 name = "osti-tui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "crossterm",
  "ratatui",

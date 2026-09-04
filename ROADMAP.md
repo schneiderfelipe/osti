@@ -18,7 +18,7 @@ This document describes what "done" looks like for a first, minimal version of `
 ### Foundation
 
 - [x] Set up the project skeleton: an empty terminal UI and an audio loop, wired together and running
-- [ ] Play a single note back in a loop, audibly and visibly, confirming UI and audio stay in sync
+- [x] Play a single note back in a loop, audibly and visibly, confirming UI and audio stay in sync
 
 ### Composing
 
