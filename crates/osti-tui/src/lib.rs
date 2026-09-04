@@ -3,11 +3,11 @@
 //! Owns talking to the terminal: entering and leaving the alternate screen, reading input, and
 //! rendering.
 
-use std::io;
+use std::{io, time::Duration};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 pub use ratatui::DefaultTerminal;
-use ratatui::Frame;
+use ratatui::{Frame, widgets::Paragraph};
 
 /// Initialize the terminal for interactive use, installing a panic hook that restores it.
 ///
@@ -25,24 +25,37 @@ pub fn restore() {
     ratatui::restore();
 }
 
-/// Draw a single, empty frame: there is nothing to compose yet.
-// Real rendering is coming; `const fn` would just have to be undone.
-#[allow(clippy::missing_const_for_fn)]
-pub fn render(_frame: &mut Frame<'_>) {}
+/// Draw a single frame, showing whether the note is currently on.
+pub fn render(frame: &mut Frame<'_>, note_on: bool) {
+    let indicator = if note_on { "●" } else { "○" };
+    frame.render_widget(Paragraph::new(indicator), frame.area());
+}
 
-/// Block until the next key is pressed, ignoring every other terminal event.
+/// A key press, or a tick after the timeout with no input.
+///
+/// The tick lets callers redraw on a timer, so the UI can reflect state that changes on its
+/// own — not just in response to a key.
+#[derive(Debug, Clone, Copy)]
+pub enum InputEvent {
+    /// A key was pressed.
+    Key(KeyEvent),
+    /// No input arrived within the timeout.
+    Tick,
+}
+
+/// Wait up to `timeout` for the next key press, ignoring every other terminal event.
 ///
 /// # Errors
 ///
-/// Returns an error if reading the next terminal event fails.
-pub fn next_key_press() -> io::Result<KeyEvent> {
-    loop {
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-        {
-            return Ok(key);
-        }
+/// Returns an error if polling or reading the next terminal event fails.
+pub fn next_event(timeout: Duration) -> io::Result<InputEvent> {
+    if event::poll(timeout)?
+        && let Event::Key(key) = event::read()?
+        && key.kind == KeyEventKind::Press
+    {
+        return Ok(InputEvent::Key(key));
     }
+    Ok(InputEvent::Tick)
 }
 
 /// Return whether the given key event should quit the application.
@@ -61,15 +74,21 @@ mod tests {
     use super::{KeyCode, KeyEvent, KeyModifiers, is_quit, render};
 
     #[test]
-    fn render_draws_a_blank_frame() {
-        let mut terminal = Terminal::new(TestBackend::new(10, 4)).unwrap();
+    fn render_shows_the_note_off() {
+        let mut terminal = Terminal::new(TestBackend::new(1, 1)).unwrap();
 
-        terminal.draw(render).unwrap();
+        terminal.draw(|frame| render(frame, false)).unwrap();
 
-        let blank_row = " ".repeat(10);
-        terminal
-            .backend()
-            .assert_buffer_lines([blank_row.as_str(); 4]);
+        terminal.backend().assert_buffer_lines(["○"]);
+    }
+
+    #[test]
+    fn render_shows_the_note_on() {
+        let mut terminal = Terminal::new(TestBackend::new(1, 1)).unwrap();
+
+        terminal.draw(|frame| render(frame, true)).unwrap();
+
+        terminal.backend().assert_buffer_lines(["●"]);
     }
 
     #[test]
