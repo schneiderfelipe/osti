@@ -1,0 +1,68 @@
+# Ostinato design
+
+This document describes the design goals for Ostinato, including rationale.
+It's heavily inspired by [Kakoune's](https://github.com/mawww/kakoune/blob/master/doc/design.asciidoc).
+
+## Interactivity
+
+Ostinato is always expected to be used interactively: the loop audibly playing and the grid visibly reflecting every edit in real time is the entire premise of the tool.
+This should not prevent Ostinato from being used non-interactively (e.g., rendering a composition to an audio file from the command line) but interactive, in-the-moment editing is what the design is built around first.
+
+## Limited scope
+
+Ostinato is a sequencer with looper features.
+It should be very good at writing note patterns, looping them, and playing simple synthesized instruments over them.
+Being merely adequate at deep sound design or professional mixing is an acceptable trade for staying sharp at that core job.
+
+## Composability
+
+Ostinato should not try to own everything a serious music setup needs.
+Where an existing, specialized tool already does a job well, Ostinato should make it easy to hand off to that tool instead of reimplementing it.
+
+## Orthogonality
+
+Orthogonality is an ideal, not an absolute.
+Only a handful of modes modify; command mode is for non-editing operations (loading and saving, opening a track).
+Transport (play, pause, seek) isn't selection manipulation either, but it stays bound in normal mode anyway: speed's few-keystrokes requirement wins here over the ideal.
+Commands should not be redundant with each other.
+
+## Speed
+
+Ostinato should be fast to use (a handful of keystrokes for common tasks like chord entry, transpose, or toggling the loop, not many) and fast to execute.
+The one hard real-time constraint the whole design turns on: the audio thread must never miss a deadline, regardless of what the terminal UI is doing at that moment.
+That asymmetry should decide any tradeoff between UI responsiveness and audio stability in the audio thread's favor, always.
+
+## Simplicity
+
+Simplicity correlates with orthogonality and speed.
+It makes the system easier to reason about, bugs easier to find, and the codebase easier to change.
+
+- **Minimal threading.**
+  One thread pair (UI thread and audio thread) joined by a single lock-free channel.
+- **No binary plugin system.**
+- **No embedded scripting language.**
+  The command line covers what a scripting language would otherwise be reached for.
+- **Limited smartness.**
+  Where Ostinato tries to be smart, it should offer a plain, non-smart alternative.
+  Smart behavior should never be the only path.
+
+## Unified interactive use and scripting
+
+This follows from orthogonality and simplicity: normal mode is not a layer of keybindings sitting on top of a separate editing language (it *is* the editing language).
+There is no internal command that a key happens to be bound to; the key dispatches the same action a typed command or a recorded macro would dispatch.
+The same has to hold for generated edits, not just typed ones.
+That single action stream is what makes undo and macros just a recording of ordinary use, rather than a second thing to design and maintain.
+
+## Instrument-agnostic
+
+Ostinato should not be tailored to one genre, and separately, it should not be tailored to one synthesis approach.
+
+## Self-documenting
+
+An unfamiliar or half-remembered keybinding should be discoverable inside the session, not by leaving it to check a reference.
+The command line's completion should double as live documentation of what's available, and a which-key-style popup for partially-typed key sequences should exist from early on.
+
+## Helix (and Kakoune) lineage
+
+Ostinato borrows its editing philosophy from Helix (and Kakoune) (selection-first, noun before verb) wherever that philosophy applies cleanly to notes and time instead of characters and lines.
+But self-consistency inside Ostinato's own domain wins whenever the analogy strains.
