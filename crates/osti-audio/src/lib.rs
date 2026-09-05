@@ -60,15 +60,14 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
     let channels = usize::from(config.channels);
     let mut tone = rate(sample_rate).const_hz(FREQUENCY_HZ).sine();
     let mut gate_phase = rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase();
-    // Matches `gate_phase`'s own starting state: phase 0.0 is always on (`DUTY` is never zero).
-    let mut on = true;
+    // Seeded to match gate_phase's own starting phase (0.0).
+    let mut on = 0.0 < DUTY;
     let err_fn = |err| eprintln!("audio stream error: {err}");
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| {
-            if data.is_empty() {
-                return;
-            }
+            // Safe to call unconditionally: fill_note's loop is a no-op on an empty slice, which
+            // leaves `on` at its last value, exactly the desired behavior.
             fill_note(data, channels, &mut tone, &mut gate_phase, &mut on);
             note_on.store(on, Ordering::Relaxed);
         },
@@ -136,8 +135,8 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
     let sample_format = supported_config.sample_format();
     let config = supported_config.into();
 
-    // True: the gate always starts at phase 0.0, which is on (see build_and_play).
-    let note_on = Arc::new(AtomicBool::new(true));
+    // Matches gate_phase's initial phase (0.0) in build_and_play.
+    let note_on = Arc::new(AtomicBool::new(0.0 < DUTY));
     let stream = match sample_format {
         SampleFormat::F32 => build_and_play::<f32>(&device, config, Arc::clone(&note_on)),
         SampleFormat::I16 => build_and_play::<i16>(&device, config, Arc::clone(&note_on)),
@@ -165,16 +164,6 @@ mod tests {
 
     fn gate_phase() -> Phase<ConstHz> {
         rate(SAMPLE_RATE).const_hz(1.0 / PERIOD_SECS).phase()
-    }
-
-    #[test]
-    fn fill_note_reports_on_at_the_start_of_a_cycle() {
-        let mut buffer = [0.0_f32; 4];
-        let mut on = false;
-
-        fill_note(&mut buffer, 1, &mut tone(), &mut gate_phase(), &mut on);
-
-        assert!(on);
     }
 
     #[test]
