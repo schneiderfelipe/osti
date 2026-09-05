@@ -31,31 +31,23 @@ pub fn render(frame: &mut Frame<'_>, note_on: bool) {
     frame.render_widget(Paragraph::new(indicator), frame.area());
 }
 
-/// A key press, or a tick after the timeout with no input.
+/// Wait up to `timeout` for the next key press.
 ///
-/// The tick lets callers redraw on a timer, so the UI can reflect state that changes on its
-/// own — not just in response to a key.
-#[derive(Debug, Clone, Copy)]
-pub enum InputEvent {
-    /// A key was pressed.
-    Key(KeyEvent),
-    /// No input arrived within the timeout.
-    Tick,
-}
-
-/// Wait up to `timeout` for the next key press, ignoring every other terminal event.
+/// Returns `None` if the timeout elapses without one, or immediately if the terminal reports any
+/// other kind of event — letting the caller redraw right away (e.g. on a resize) instead of
+/// waiting out the rest of the timeout.
 ///
 /// # Errors
 ///
 /// Returns an error if polling or reading the next terminal event fails.
-pub fn next_event(timeout: Duration) -> io::Result<InputEvent> {
+pub fn next_event(timeout: Duration) -> io::Result<Option<KeyEvent>> {
     if event::poll(timeout)?
         && let Event::Key(key) = event::read()?
         && key.kind == KeyEventKind::Press
     {
-        return Ok(InputEvent::Key(key));
+        return Ok(Some(key));
     }
-    Ok(InputEvent::Tick)
+    Ok(None)
 }
 
 /// Return whether the given key event should quit the application.

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use color_eyre::Result;
 use osti_audio::NoteLoop;
-use osti_tui::{DefaultTerminal, InputEvent};
+use osti_tui::DefaultTerminal;
 
 /// How often the UI redraws on its own, to reflect the note's state changing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
@@ -29,7 +29,7 @@ fn run(terminal: &mut DefaultTerminal, audio_loop: Option<&NoteLoop>) -> Result<
         let note_on = audio_loop.is_some_and(NoteLoop::is_note_on);
         terminal.draw(|frame| osti_tui::render(frame, note_on))?;
 
-        if let InputEvent::Key(key) = osti_tui::next_event(REDRAW_INTERVAL)?
+        if let Some(key) = osti_tui::next_event(REDRAW_INTERVAL)?
             && osti_tui::is_quit(key)
         {
             return Ok(());
