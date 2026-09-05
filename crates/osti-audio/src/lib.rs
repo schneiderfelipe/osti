@@ -3,7 +3,6 @@
 //! Owns talking to the audio device.
 
 use std::{
-    f32::consts::TAU,
     fmt,
     sync::{
         Arc,
@@ -15,68 +14,54 @@ use cpal::{
     FromSample, Sample, SampleFormat, SizedSample, Stream,
     traits::{DeviceTrait, HostTrait, StreamTrait},
 };
+use dasp_signal::{Signal, rate};
 
 /// Pitch of the looping note, in Hz (A4).
-const FREQUENCY_HZ: f32 = 440.0;
+const FREQUENCY_HZ: f64 = 440.0;
 
 /// How long one on-then-off cycle of the note takes, in seconds.
-const PERIOD_SECS: f32 = 0.8;
+const PERIOD_SECS: f64 = 0.8;
 
-/// Fraction of `PERIOD_SECS` the note is audible for, starting each cycle.
-const DUTY: f32 = 0.5;
+/// Fraction of each cycle the note is audible for, starting each cycle.
+const DUTY: f64 = 0.5;
 
-// Wrapping the phase at each period boundary (see `fill_note`) only stays click-free if a whole
-// number of cycles fits in one period.
-#[allow(clippy::float_cmp)] // comparing a compile-time constant expression to a hardcoded 0.0
-const _: () = assert!((FREQUENCY_HZ * PERIOD_SECS) % 1.0 == 0.0);
-
-// Whether the note is audible at the given number of seconds since playback started.
-fn is_note_on(elapsed_secs: f32) -> bool {
-    elapsed_secs.rem_euclid(PERIOD_SECS) < PERIOD_SECS * DUTY
-}
-
-// The note's waveform value at the given number of seconds since playback started.
-fn note_sample(elapsed_secs: f32) -> f32 {
-    (elapsed_secs * FREQUENCY_HZ * TAU).sin()
-}
-
-// Fill a buffer with the looping note, advancing `elapsed_secs` by one sample each step and
-// reporting whether the note was on by the end of the buffer.
-fn fill_note<T: Sample + FromSample<f32>>(
-    data: &mut [T],
-    elapsed_secs: &mut f32,
-    sample_rate: f32,
-) -> bool {
+// Fill a buffer from `tone`, muted whenever `gate_phase`'s fractional cycle position (which
+// wraps every step) falls outside the duty cycle. `tone` is always stepped, even while muted, so
+// its pitch stays accurate to real elapsed time. Reports whether the note was on by the end of
+// the buffer.
+fn fill_note<T, O, G>(data: &mut [T], tone: &mut O, gate_phase: &mut G) -> bool
+where
+    T: Sample + FromSample<f64>,
+    O: Signal<Frame = f64>,
+    G: Signal<Frame = f64>,
+{
     let mut note_on = false;
     for sample in data.iter_mut() {
-        note_on = is_note_on(*elapsed_secs);
+        let tone_value = tone.next();
+        note_on = gate_phase.next() < DUTY;
         *sample = if note_on {
-            T::from_sample(note_sample(*elapsed_secs))
+            T::from_sample(tone_value)
         } else {
             T::EQUILIBRIUM
         };
-        // Wrapped into a single cycle so this stays precise no matter how long playback runs:
-        // `FREQUENCY_HZ * PERIOD_SECS` is a whole number, so the wrap doesn't click the sine.
-        *elapsed_secs = (*elapsed_secs + 1.0 / sample_rate).rem_euclid(PERIOD_SECS);
     }
     note_on
 }
 
 // Build and start a stream that loops the note, reporting its on/off state through `note_on`.
-fn build_and_play<T: SizedSample + FromSample<f32>>(
+fn build_and_play<T: SizedSample + FromSample<f64>>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
     note_on: Arc<AtomicBool>,
 ) -> Result<Stream, cpal::Error> {
-    // Real sample rates are far below 2^24, so this cast is exact.
-    #[allow(clippy::cast_precision_loss)]
-    let sample_rate = config.sample_rate as f32;
-    let mut elapsed_secs = 0.0;
+    let sample_rate = f64::from(config.sample_rate);
+    let mut tone = rate(sample_rate).const_hz(FREQUENCY_HZ).sine();
+    let mut gate_phase = rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase();
     let err_fn = |err| eprintln!("audio stream error: {err}");
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| {
-            let on = fill_note(data, &mut elapsed_secs, sample_rate);
+            let on = fill_note(data, &mut tone, &mut gate_phase);
             note_on.store(on, Ordering::Relaxed);
         },
         err_fn,
@@ -159,30 +144,19 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{DUTY, PERIOD_SECS, fill_note, is_note_on};
+    use dasp_signal::{Signal, rate};
+
+    use super::{DUTY, FREQUENCY_HZ, PERIOD_SECS, fill_note};
+
+    const SAMPLE_RATE: f64 = 44_100.0;
 
     #[test]
-    fn note_is_on_at_the_start_of_a_cycle() {
-        assert!(is_note_on(0.0));
-        assert!(is_note_on(PERIOD_SECS * DUTY * 0.5));
-    }
-
-    #[test]
-    fn note_is_off_in_the_second_half_of_a_cycle() {
-        assert!(!is_note_on(PERIOD_SECS * DUTY));
-        assert!(!is_note_on(PERIOD_SECS * 0.99));
-    }
-
-    #[test]
-    fn note_cycles_repeat() {
-        assert_eq!(is_note_on(0.1), is_note_on(0.1 + PERIOD_SECS));
-    }
-
-    #[test]
-    fn fill_note_reports_on_when_the_buffer_ends_on() {
+    fn fill_note_reports_on_at_the_start_of_a_cycle() {
         let mut buffer = [0.0_f32; 4];
-        let mut elapsed_secs = 0.0;
-        assert!(fill_note(&mut buffer, &mut elapsed_secs, 44_100.0));
+        let mut tone = rate(SAMPLE_RATE).const_hz(FREQUENCY_HZ).sine();
+        let mut gate_phase = rate(SAMPLE_RATE).const_hz(1.0 / PERIOD_SECS).phase();
+
+        assert!(fill_note(&mut buffer, &mut tone, &mut gate_phase));
     }
 
     #[test]
@@ -190,20 +164,40 @@ mod tests {
     #[allow(clippy::float_cmp)]
     fn fill_note_writes_silence_when_off() {
         let mut buffer = [1.0_f32; 4];
-        let mut elapsed_secs = PERIOD_SECS * DUTY;
-        fill_note(&mut buffer, &mut elapsed_secs, 44_100.0);
+        let mut tone = rate(SAMPLE_RATE).const_hz(FREQUENCY_HZ).sine();
+        let mut gate_phase = rate(SAMPLE_RATE).const_hz(1.0 / PERIOD_SECS).phase();
+        // Step past the duty cycle's end, with a small margin against rounding at the boundary.
+        // Small, known-non-negative values, so the truncation is exact and the sign is moot.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps_past_duty_cycle = (SAMPLE_RATE * PERIOD_SECS * DUTY) as u64 + 10;
+        for _ in 0..steps_past_duty_cycle {
+            gate_phase.next();
+        }
+
+        fill_note(&mut buffer, &mut tone, &mut gate_phase);
+
         assert!(buffer.iter().all(|&s| s == 0.0));
     }
 
     #[test]
-    fn elapsed_secs_stays_bounded_past_where_f32_precision_would_stall_it() {
+    fn fill_note_keeps_toggling_across_many_cycles() {
         let mut buffer = [0.0_f32; 512];
-        let mut elapsed_secs = 0.0;
-        // ~600 simulated seconds: an unwrapped accumulator permanently stalls at exactly 512.0,
-        // where f32's precision at that magnitude can no longer represent the per-sample step.
-        for _ in 0..50_000 {
-            fill_note(&mut buffer, &mut elapsed_secs, 44_100.0);
+        let mut tone = rate(SAMPLE_RATE).const_hz(FREQUENCY_HZ).sine();
+        let mut gate_phase = rate(SAMPLE_RATE).const_hz(1.0 / PERIOD_SECS).phase();
+
+        // ~460 simulated seconds across many buffers: an accumulator that drifted or stalled
+        // (the class of bug a hand-rolled one once had) would eventually stop toggling.
+        let mut saw_on = false;
+        let mut saw_off = false;
+        for _ in 0..40_000 {
+            if fill_note(&mut buffer, &mut tone, &mut gate_phase) {
+                saw_on = true;
+            } else {
+                saw_off = true;
+            }
         }
-        assert!((0.0..PERIOD_SECS).contains(&elapsed_secs));
+
+        assert!(saw_on);
+        assert!(saw_off);
     }
 }
