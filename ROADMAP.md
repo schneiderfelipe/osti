@@ -62,14 +62,14 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ## Beyond MVP
 
-- [ ] Macros: record and replay a stretch of edits
-- [ ] Which-key guidance: show the keys available for a partially-typed sequence
-- [ ] Non-interactive rendering: render a composition to an audio file from the command line
-- [ ] Deeper sound and mixing, kept secondary to writing and looping patterns
-- [ ] Handing off to specialized tools instead of reimplementing their job
+- [ ] Record and replay a stretch of edits as macros
+- [ ] Show which-key guidance for a partially-typed key sequence
+- [ ] Render a composition to an audio file from the command line (no interactive UI needed)
+- [ ] Deepen sound design and mixing, kept secondary to writing and looping patterns
+- [ ] Hand off to specialized tools instead of reimplementing their job
 
 ## Non-goals
 
 - A binary plugin system.
 - An embedded scripting language.
-- Matching dedicated DAWs at deep sound design or professional mixing.
+- Deep sound design or professional mixing on par with dedicated DAWs.

@@ -92,8 +92,8 @@ pub struct NoteLoop {
 impl NoteLoop {
     /// Return whether the note is audible right now.
     ///
-    /// Updated once per audio buffer, not per sample — plenty precise for anything watching it
-    /// at UI-frame granularity.
+    /// Updated once per audio buffer, not per sample (plenty precise for anything watching it
+    /// at UI-frame granularity).
     #[must_use]
     pub fn is_note_on(&self) -> bool {
         self.note_on.load(Ordering::Relaxed)

@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame<'_>, note_on: bool) {
 /// Wait up to `timeout` for the next key press.
 ///
 /// Returns `None` if the timeout elapses without one, or immediately if the terminal reports any
-/// other kind of event — letting the caller redraw right away (e.g. on a resize) instead of
+/// other kind of event, letting the caller redraw right away (e.g. on a resize) instead of
 /// waiting out the rest of the timeout.
 ///
 /// # Errors
