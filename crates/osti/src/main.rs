@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use clap::Parser;
 use color_eyre::Result;
 use osti_audio::NoteLoop;
 use osti_tui::DefaultTerminal;
@@ -9,8 +10,14 @@ use osti_tui::DefaultTerminal;
 /// How often the UI redraws on its own, to reflect the note's state changing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
 
+/// Command-line arguments, currently just `--help`/`--version`.
+#[derive(Parser)]
+#[command(version, about)]
+struct Cli;
+
 fn main() -> Result<()> {
     color_eyre::install()?;
+    Cli::parse();
 
     let audio_loop = osti_audio::play_looping_note()
         .inspect_err(|err| eprintln!("audio: {err}, continuing without sound"))
