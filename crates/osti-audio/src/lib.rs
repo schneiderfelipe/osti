@@ -25,12 +25,22 @@ const PERIOD_SECS: f64 = 0.8;
 /// Fraction of each cycle the note is audible for, starting each cycle.
 const DUTY: f64 = 0.5;
 
+/// Whether the gate is on at the very start of a cycle, i.e. at phase 0.0.
+const GATE_STARTS_ON: bool = 0.0 < DUTY;
+
+/// Build the tone and gate-phase signals for a given sample rate.
+fn signals(sample_rate: f64) -> (Sine<ConstHz>, Phase<ConstHz>) {
+    let tone = rate(sample_rate).const_hz(FREQUENCY_HZ).sine();
+    let gate_phase = rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase();
+    (tone, gate_phase)
+}
+
 // Fill a buffer of interleaved frames from `tone`, muted whenever `gate_phase`'s fractional
 // cycle position (which wraps every step) falls outside the duty cycle. `tone` and `gate_phase`
 // are stepped once per frame, not once per sample, so multi-channel output isn't sped up; every
 // channel of a frame gets the same value. `tone` is always stepped, even while muted, so its
 // pitch stays accurate to real elapsed time. Reports whether the note was on by the end of the
-// buffer, or the loop's prior state if the buffer had no frames.
+// buffer, or the loop's prior state if the buffer had no frames (or `channels` is zero).
 fn fill_note<T: Sample + FromSample<f64>>(
     data: &mut [T],
     channels: usize,
@@ -38,6 +48,11 @@ fn fill_note<T: Sample + FromSample<f64>>(
     gate_phase: &mut Phase<ConstHz>,
     note_on: &mut bool,
 ) {
+    // `chunks_mut` panics on a zero chunk size; a device reporting zero channels shouldn't crash
+    // the audio thread over it.
+    if channels == 0 {
+        return;
+    }
     for frame in data.chunks_mut(channels) {
         let tone_value = tone.next();
         *note_on = gate_phase.next() < DUTY;
@@ -50,6 +65,13 @@ fn fill_note<T: Sample + FromSample<f64>>(
     }
 }
 
+// Log a stream error and mark the note off, since the stream may never call the data callback
+// again afterward to report the truth itself.
+fn handle_stream_error(err: &cpal::Error, note_on: &AtomicBool) {
+    eprintln!("audio stream error: {err}");
+    note_on.store(false, Ordering::Relaxed);
+}
+
 // Build and start a stream that loops the note, reporting its on/off state through `note_on`.
 fn build_and_play<T: SizedSample + FromSample<f64>>(
     device: &cpal::Device,
@@ -58,11 +80,12 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
 ) -> Result<Stream, cpal::Error> {
     let sample_rate = f64::from(config.sample_rate);
     let channels = usize::from(config.channels);
-    let mut tone = rate(sample_rate).const_hz(FREQUENCY_HZ).sine();
-    let mut gate_phase = rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase();
-    // Seeded to match gate_phase's own starting phase (0.0).
-    let mut on = 0.0 < DUTY;
-    let err_fn = |err| eprintln!("audio stream error: {err}");
+    let (mut tone, mut gate_phase) = signals(sample_rate);
+    let mut on = GATE_STARTS_ON;
+    let err_fn = {
+        let note_on = Arc::clone(&note_on);
+        move |err| handle_stream_error(&err, &note_on)
+    };
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| {
@@ -135,8 +158,7 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
     let sample_format = supported_config.sample_format();
     let config = supported_config.into();
 
-    // Matches gate_phase's initial phase (0.0) in build_and_play.
-    let note_on = Arc::new(AtomicBool::new(0.0 < DUTY));
+    let note_on = Arc::new(AtomicBool::new(GATE_STARTS_ON));
     let stream = match sample_format {
         SampleFormat::F32 => build_and_play::<f32>(&device, config, Arc::clone(&note_on)),
         SampleFormat::I16 => build_and_play::<i16>(&device, config, Arc::clone(&note_on)),
@@ -152,18 +174,22 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
 
 #[cfg(test)]
 mod tests {
-    use dasp_signal::{ConstHz, Phase, Signal, Sine, rate};
+    use std::sync::atomic::{AtomicBool, Ordering};
 
-    use super::{DUTY, FREQUENCY_HZ, PERIOD_SECS, fill_note};
+    use dasp_signal::{ConstHz, Phase, Signal, Sine};
+
+    use super::{DUTY, PERIOD_SECS, fill_note, handle_stream_error, signals};
 
     const SAMPLE_RATE: f64 = 44_100.0;
 
+    // fill_note takes concrete signal types, so these stay concrete too (an `impl Signal` return
+    // wouldn't satisfy that parameter type).
     fn tone() -> Sine<ConstHz> {
-        rate(SAMPLE_RATE).const_hz(FREQUENCY_HZ).sine()
+        signals(SAMPLE_RATE).0
     }
 
     fn gate_phase() -> Phase<ConstHz> {
-        rate(SAMPLE_RATE).const_hz(1.0 / PERIOD_SECS).phase()
+        signals(SAMPLE_RATE).1
     }
 
     #[test]
@@ -185,6 +211,28 @@ mod tests {
 
         assert!(!on);
         assert!(buffer.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn handle_stream_error_marks_the_note_off() {
+        let note_on = AtomicBool::new(true);
+
+        handle_stream_error(
+            &cpal::Error::new(cpal::ErrorKind::DeviceNotAvailable),
+            &note_on,
+        );
+
+        assert!(!note_on.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn fill_note_does_not_panic_on_zero_channels() {
+        let mut buffer = [0.0_f32; 4];
+        let mut on = true;
+
+        fill_note(&mut buffer, 0, &mut tone(), &mut gate_phase(), &mut on);
+
+        assert!(on, "left untouched, same as an empty buffer");
     }
 
     #[test]
