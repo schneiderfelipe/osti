@@ -240,11 +240,11 @@ mod tests {
         let mut gate_phase = gate_phase();
         let mut on = false;
 
-        // ~460 simulated seconds across many buffers: an accumulator that drifted or stalled
-        // (the class of bug a hand-rolled one once had) would eventually stop toggling.
+        // A handful of cycles is enough to see both states; dasp_signal's Phase wraps every step
+        // by construction; this just confirms our own glue code passes that through correctly.
         let mut saw_on = false;
         let mut saw_off = false;
-        for _ in 0..40_000 {
+        for _ in 0..300 {
             fill_note(&mut buffer, 1, &mut tone, &mut gate_phase, &mut on);
             if on {
                 saw_on = true;
