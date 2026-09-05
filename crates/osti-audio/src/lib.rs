@@ -25,6 +25,11 @@ const PERIOD_SECS: f32 = 0.8;
 /// Fraction of `PERIOD_SECS` the note is audible for, starting each cycle.
 const DUTY: f32 = 0.5;
 
+// Wrapping the phase at each period boundary (see `fill_note`) only stays click-free if a whole
+// number of cycles fits in one period.
+#[allow(clippy::float_cmp)] // comparing a compile-time constant expression to a hardcoded 0.0
+const _: () = assert!((FREQUENCY_HZ * PERIOD_SECS) % 1.0 == 0.0);
+
 // Whether the note is audible at the given number of seconds since playback started.
 fn is_note_on(elapsed_secs: f32) -> bool {
     elapsed_secs.rem_euclid(PERIOD_SECS) < PERIOD_SECS * DUTY
@@ -50,7 +55,9 @@ fn fill_note<T: Sample + FromSample<f32>>(
         } else {
             T::EQUILIBRIUM
         };
-        *elapsed_secs += 1.0 / sample_rate;
+        // Wrapped into a single cycle so this stays precise no matter how long playback runs:
+        // `FREQUENCY_HZ * PERIOD_SECS` is a whole number, so the wrap doesn't click the sine.
+        *elapsed_secs = (*elapsed_secs + 1.0 / sample_rate).rem_euclid(PERIOD_SECS);
     }
     note_on
 }
@@ -61,6 +68,7 @@ fn build_and_play<T: SizedSample + FromSample<f32>>(
     config: cpal::StreamConfig,
     note_on: Arc<AtomicBool>,
 ) -> Result<Stream, cpal::Error> {
+    // Real sample rates are far below 2^24, so this cast is exact.
     #[allow(clippy::cast_precision_loss)]
     let sample_rate = config.sample_rate as f32;
     let mut elapsed_secs = 0.0;
@@ -185,5 +193,17 @@ mod tests {
         let mut elapsed_secs = PERIOD_SECS * DUTY;
         fill_note(&mut buffer, &mut elapsed_secs, 44_100.0);
         assert!(buffer.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn elapsed_secs_stays_bounded_past_where_f32_precision_would_stall_it() {
+        let mut buffer = [0.0_f32; 512];
+        let mut elapsed_secs = 0.0;
+        // ~600 simulated seconds: an unwrapped accumulator permanently stalls at exactly 512.0,
+        // where f32's precision at that magnitude can no longer represent the per-sample step.
+        for _ in 0..50_000 {
+            fill_note(&mut buffer, &mut elapsed_secs, 44_100.0);
+        }
+        assert!((0.0..PERIOD_SECS).contains(&elapsed_secs));
     }
 }
