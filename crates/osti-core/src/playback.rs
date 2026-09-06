@@ -3,8 +3,8 @@
 
 use nonempty::NonEmpty;
 
-use crate::pattern::{Pattern, Position};
 use crate::time::{Length, Tick};
+use crate::track::{Position, Track};
 use crate::transport::{PlaybackIntent, Transport};
 
 /// Which track, among a [`Playback`]'s tracks.
@@ -19,23 +19,29 @@ pub struct TrackId(pub u8);
 #[derive(Debug, Clone)]
 pub struct Playback {
     /// The tracks being played, together.
-    pub tracks: NonEmpty<Pattern>,
+    pub tracks: NonEmpty<Track>,
     /// The shared transport.
     pub transport: Transport,
 }
 
 impl Playback {
-    /// One empty track, `length` ticks long, not playing.
+    /// One empty track, not playing.
     #[must_use]
-    pub fn new(length: Tick) -> Self {
+    pub fn new() -> Self {
         Self {
-            tracks: NonEmpty::new(Pattern::new(length)),
+            tracks: NonEmpty::new(Track::new()),
             transport: Transport::default(),
         }
     }
 
-    fn track_mut(&mut self, track: TrackId) -> &mut Pattern {
+    fn track_mut(&mut self, track: TrackId) -> &mut Track {
         &mut self.tracks[usize::from(track.0)]
+    }
+}
+
+impl Default for Playback {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -159,7 +165,7 @@ mod tests {
 
     #[test]
     fn inserting_a_note_undoes_to_removing_it() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         let insert = PlaybackAction::InsertNote {
             track: TrackId(0),
             at: at(0, 60),
@@ -179,7 +185,7 @@ mod tests {
 
     #[test]
     fn removing_nothing_is_not_undoable() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         let inverse = playback.apply(&PlaybackAction::RemoveNote {
             track: TrackId(0),
             at: at(0, 60),
@@ -189,7 +195,7 @@ mod tests {
 
     #[test]
     fn transport_actions_are_not_undoable() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         let inverse = playback.apply(&PlaybackAction::SetPlaybackIntent(PlaybackIntent::Playing));
         assert_eq!(inverse, None);
         assert_eq!(playback.transport.intent, PlaybackIntent::Playing);
@@ -197,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_batch_mixing_undoable_and_not_reverts_only_the_undoable_part() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         let batch = PlaybackAction::Batch(Box::new(NonEmpty::from((
             PlaybackAction::InsertNote {
                 track: TrackId(0),
@@ -222,7 +228,7 @@ mod tests {
 
     #[test]
     fn inserting_over_an_existing_note_undoes_to_restoring_it() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         playback.apply(&PlaybackAction::InsertNote {
             track: TrackId(0),
             at: at(0, 60),

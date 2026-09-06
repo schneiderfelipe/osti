@@ -1,11 +1,11 @@
-//! A pattern: notes placed in pitch and time.
+//! A track: notes placed in pitch and time.
 
 use std::collections::BTreeMap;
 
 use crate::pitch::Pitch;
 use crate::time::{Length, Tick};
 
-/// A coordinate in a pattern's grid.
+/// A coordinate in a track's grid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Position {
     /// When the note starts.
@@ -14,30 +14,24 @@ pub struct Position {
     pub pitch: Pitch,
 }
 
-/// One loop's worth of notes: a sorted map from where each note starts to how long it lasts, plus
-/// the pattern's own loop length.
+/// A sorted map from where each note starts to how long it lasts.
 ///
 /// The value only carries data about the note *other* than its pitch (currently just how long it
 /// lasts) — the pitch is already the other half of the key, so repeating it in the value would be
-/// the same fact stored twice.
+/// the same fact stored twice. No length or looping of its own yet — a track is just an open,
+/// unbounded timeline of notes; how much of it plays, loops, or is shown is a separate concern
+/// for later (transport, viewport), not this type's job.
 #[derive(Debug, Clone, Default)]
-pub struct Pattern {
+pub struct Track {
     notes: BTreeMap<Position, Length>,
-    /// How long one loop of this pattern is, in ticks.
-    ///
-    /// Independent of `notes`, not derived from it — an empty pattern still needs a length to
-    /// have a grid to place notes into, and deriving it from the last note's end would mean
-    /// removing that note silently shrinks the loop for everything else in it.
-    pub length: Tick,
 }
 
-impl Pattern {
-    /// An empty pattern, `length` ticks long.
+impl Track {
+    /// An empty track.
     #[must_use]
-    pub const fn new(length: Tick) -> Self {
+    pub const fn new() -> Self {
         Self {
             notes: BTreeMap::new(),
-            length,
         }
     }
 
@@ -69,7 +63,7 @@ impl Pattern {
     }
 
     /// Place a note at `at`, removing (and returning) whatever same-pitch notes it overlaps —
-    /// two notes of the same pitch sounding at once in one pattern isn't a sound, it's an
+    /// two notes of the same pitch sounding at once in one track isn't a sound, it's an
     /// undefined one; a chord is several *different* pitches, not overlapping copies of one.
     pub(crate) fn insert(&mut self, at: Position, length: Length) -> Vec<(Position, Length)> {
         let removed = self.overlapping(at.pitch, at.tick, length);
@@ -121,46 +115,46 @@ mod tests {
     }
 
     #[test]
-    fn empty_pattern_has_no_notes_sounding() {
-        let pattern = Pattern::new(Tick(16));
-        assert_eq!(pattern.sounding_at(Tick(0)).count(), 0);
+    fn empty_track_has_no_notes_sounding() {
+        let track = Track::new();
+        assert_eq!(track.sounding_at(Tick(0)).count(), 0);
     }
 
     #[test]
     fn sounding_at_finds_a_chord() {
-        let mut pattern = Pattern::new(Tick(16));
-        pattern.insert(at(0, 60), Length(4));
-        pattern.insert(at(0, 64), Length(4));
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(4));
+        track.insert(at(0, 64), Length(4));
 
-        assert_eq!(pattern.sounding_at(Tick(2)).count(), 2);
+        assert_eq!(track.sounding_at(Tick(2)).count(), 2);
     }
 
     #[test]
     fn sounding_at_excludes_notes_outside_their_span() {
-        let mut pattern = Pattern::new(Tick(16));
-        pattern.insert(at(0, 60), Length(4));
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(4));
 
-        assert_eq!(pattern.sounding_at(Tick(4)).count(), 0); // [0, 4) — 4 is just past the end
+        assert_eq!(track.sounding_at(Tick(4)).count(), 0); // [0, 4) — 4 is just past the end
     }
 
     #[test]
     fn inserting_over_a_same_pitch_note_replaces_it() {
-        let mut pattern = Pattern::new(Tick(16));
-        pattern.insert(at(0, 60), Length(8));
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(8));
 
-        let removed = pattern.insert(at(2, 60), Length(2));
+        let removed = track.insert(at(2, 60), Length(2));
 
         assert_eq!(removed, vec![(at(0, 60), Length(8))]);
-        assert_eq!(pattern.sounding_at(Tick(0)).count(), 0); // the old note is gone
-        assert_eq!(pattern.sounding_at(Tick(2)).count(), 1); // the new one took its place
+        assert_eq!(track.sounding_at(Tick(0)).count(), 0); // the old note is gone
+        assert_eq!(track.sounding_at(Tick(2)).count(), 1); // the new one took its place
     }
 
     #[test]
     fn different_pitches_never_conflict() {
-        let mut pattern = Pattern::new(Tick(16));
-        pattern.insert(at(0, 60), Length(8));
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(8));
 
-        let removed = pattern.insert(at(0, 61), Length(8));
+        let removed = track.insert(at(0, 61), Length(8));
         assert!(removed.is_empty());
     }
 }

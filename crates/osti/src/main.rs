@@ -7,14 +7,10 @@ use color_eyre::Result;
 
 use osti_audio::PlaybackHandle;
 use osti_core::{Action, Editor, PlaybackIntent, Tick};
-use osti_tui::{DefaultTerminal, KeyOutcome, Keymap};
+use osti_tui::{DefaultTerminal, Keymap};
 
 /// How often the UI redraws on its own, to reflect the transport advancing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
-
-/// A pattern with no scrolling needs to fit on one screen; 16 ticks is a bar's worth at today's
-/// fixed subdivision, hardcoded for now (see osti-audio's `TICK_SECS`).
-const PATTERN_LENGTH: Tick = Tick(16);
 
 /// Command-line arguments.
 // `about` pulls its text from Cargo.toml's description, already the same sentence as the crate
@@ -27,7 +23,7 @@ fn main() -> Result<()> {
     color_eyre::install()?;
     Cli::parse();
 
-    let mut editor = Editor::new(PATTERN_LENGTH);
+    let mut editor = Editor::new();
     let mut audio = osti_audio::play(editor.playback.clone())
         .inspect_err(|err| eprintln!("audio: {err}, continuing without sound"))
         .ok();
@@ -52,18 +48,13 @@ fn run(
         let Some(key) = osti_tui::next_event(REDRAW_INTERVAL)? else {
             continue;
         };
-        if osti_tui::is_quit(key) {
+        let Some(action) = keymap.feed(key, editor) else {
+            continue;
+        };
+        if action == Action::Quit {
             return Ok(());
         }
-        match keymap.feed(key, editor) {
-            KeyOutcome::Pending | KeyOutcome::Cancelled => {}
-            KeyOutcome::SwitchMode(mode) => editor.mode = mode,
-            KeyOutcome::Resolved(action) => perform(editor, audio, &action),
-            KeyOutcome::ResolvedAndSwitchMode(action, mode) => {
-                perform(editor, audio, &action);
-                editor.mode = mode;
-            }
-        }
+        perform(editor, audio, action);
     }
 }
 
@@ -80,15 +71,13 @@ fn playhead(editor: &Editor, audio: Option<&PlaybackHandle>) -> Tick {
 }
 
 /// Apply an action to the editor, then forward whatever it actually changed to the audio thread's
-/// own replica — the concrete replayed action for `Undo`/`Redo`, or `action` itself otherwise
-/// (see `Editor::update`'s docs on why only the former needs anything reported back).
-fn perform(editor: &mut Editor, audio: &mut Option<PlaybackHandle>, action: &Action) {
-    let outcome = editor.update(action);
-    let Action::Playback(playback_action) = outcome.as_ref().unwrap_or(action) else {
+/// own replica whenever that's audio-relevant.
+fn perform(editor: &mut Editor, audio: &mut Option<PlaybackHandle>, action: Action) {
+    let Some(Action::Playback(playback_action)) = editor.update(action) else {
         return;
     };
     if let Some(handle) = audio {
-        handle.send(playback_action.clone());
+        handle.send(playback_action);
     }
 }
 

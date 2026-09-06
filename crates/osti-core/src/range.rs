@@ -1,8 +1,8 @@
-//! A selectable span of one pattern's grid.
+//! A selectable span of one track's grid.
 
-use crate::pattern::Position;
 use crate::pitch::Pitch;
 use crate::time::{Length, Tick};
+use crate::track::Position;
 
 /// One pitch row, spanning ticks from `anchor` to `head` (either order — extending "backward" is
 /// just `head < anchor`).

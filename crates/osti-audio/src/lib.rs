@@ -102,11 +102,11 @@ impl Player {
         for voice in &mut self.voices {
             voice.target = 0.0;
         }
+        let tick = self.playback.transport.position;
         for (index, track) in self.playback.tracks.iter().enumerate() {
             #[allow(clippy::cast_possible_truncation)] // realistically far fewer than 256 tracks
             let track_id = TrackId(index as u8);
-            let local_tick = Tick(self.playback.transport.position.0 % track.length.0.max(1));
-            for (position, _) in track.sounding_at(local_tick) {
+            for (position, _) in track.sounding_at(tick) {
                 if let Some(voice) = self
                     .voices
                     .iter_mut()
@@ -314,14 +314,14 @@ mod tests {
 
     #[test]
     fn fill_does_not_panic_on_zero_channels() {
-        let (mut player, _producer) = new_player(Playback::new(Tick(16)));
+        let (mut player, _producer) = new_player(Playback::new());
         let mut buffer = [0.0_f32; 4];
         player.fill(&mut buffer, 0); // must not panic
     }
 
     #[test]
     fn a_note_ramps_in_instead_of_starting_at_full_volume() {
-        let mut playback = Playback::new(Tick(16));
+        let mut playback = Playback::new();
         playback.apply(&note(0, 0, 60, 4));
         playback.transport.intent = PlaybackIntent::Playing;
         let (mut player, _producer) = new_player(playback);
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn silence_when_nothing_is_playing() {
-        let (mut player, _producer) = new_player(Playback::new(Tick(16)));
+        let (mut player, _producer) = new_player(Playback::new());
         let mut buffer = [1_i16; 4];
 
         player.fill(&mut buffer, 1);
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn commands_from_the_queue_are_applied() {
-        let (mut player, mut producer) = new_player(Playback::new(Tick(16)));
+        let (mut player, mut producer) = new_player(Playback::new());
         send(&mut producer, note(0, 0, 60, 4));
         send(
             &mut producer,
@@ -364,8 +364,8 @@ mod tests {
 
     #[test]
     fn two_tracks_mix_together() {
-        let mut playback = Playback::new(Tick(16));
-        playback.tracks.push(osti_core::Pattern::new(Tick(16)));
+        let mut playback = Playback::new();
+        playback.tracks.push(osti_core::Track::new());
         let (mut player, mut producer) = new_player(playback);
         send(&mut producer, note(0, 0, 60, 4));
         send(&mut producer, note(1, 0, 64, 4));

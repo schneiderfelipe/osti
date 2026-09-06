@@ -1,14 +1,15 @@
 //! Time, measured in ticks.
 
-/// A position in time within a pattern, measured in ticks.
+/// A position in time on a track, measured in ticks.
 ///
-/// Wraps at the pattern's own length — like a clock face, a tick past the end is the same
-/// position on the next lap, not a new one. A future song-wide absolute tick (once arrangement
-/// exists) would be a different, non-wrapping thing, not this type reused.
+/// Plain and absolute for now — no wrapping, no loop of its own. Looping (even partial: looping
+/// just a region of a track some number of times) is real future work, but it needs its own
+/// concept (a loop region, a repeat count) rather than folding into what a tick means; not
+/// building that until there's an actual design for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Tick(pub u16);
 
-/// A span of time, measured in ticks — a note's duration, or a whole pattern's loop length.
+/// A span of time, measured in ticks — a note's duration.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Length(pub u8);
 

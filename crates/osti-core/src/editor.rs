@@ -19,36 +19,35 @@ pub struct Editor {
     pub selection: Selection,
     /// The current editing mode.
     pub mode: Mode,
+    /// The `:` command line's text, meaningful only while `mode` is `Command`.
+    pub command_line: String,
     history: History,
 }
 
 impl Editor {
-    /// A fresh editor over one empty track, `length` ticks long, with a single collapsed
-    /// selection at the start.
+    /// A fresh editor: one empty track, a single collapsed selection at the start, normal mode.
     #[must_use]
-    pub fn new(length: Tick) -> Self {
+    pub fn new() -> Self {
         Self {
-            playback: Playback::new(length),
+            playback: Playback::new(),
             selection: Selection::single(Range {
                 pitch: Pitch::A4,
                 anchor: Tick(0),
                 head: Tick(0),
             }),
             mode: Mode::default(),
+            command_line: String::new(),
             history: History::default(),
         }
     }
 
-    /// Apply one action, returning the action that was actually applied to reach the new state,
-    /// when the caller couldn't already know that from `action` alone.
-    ///
-    /// For `Undo`/`Redo` this is the replayed action — forward it to the audio thread's own
-    /// `Playback` whenever it's `Action::Playback(_)`. For anything else this is always `None`:
-    /// the caller still owns `action` itself (never consumed here) and already knows what to
-    /// forward from that. `None` for `Undo`/`Redo` specifically means there was nothing to
-    /// replay (an empty stack) — also nothing to forward.
-    pub fn update(&mut self, action: &Action) -> Option<Action> {
-        match action {
+    /// Apply one action, returning the action that was actually applied in the forward
+    /// direction — for `Undo`/`Redo` that's the replayed action, not the token itself; for
+    /// anything else it's simply `action` handed back. Forward it to the audio thread's own
+    /// `Playback` whenever it's `Action::Playback(_)`. `None` only for `Undo`/`Redo` with nothing
+    /// to replay (an empty stack) — nothing to forward then either.
+    pub fn update(&mut self, action: Action) -> Option<Action> {
+        match &action {
             Action::Quit => {
                 unreachable!("Quit is intercepted by the runtime before reaching Editor::update")
             }
@@ -60,28 +59,42 @@ impl Editor {
                 Some(inverse)
             }
             Action::Redo => {
-                let action = self.history.pop_redo()?;
-                if let Some(undo) = self.mutate(&action) {
+                let redone = self.history.pop_redo()?;
+                if let Some(undo) = self.mutate(&redone) {
                     self.history.push_undo(undo);
                 }
-                Some(action)
+                Some(redone)
             }
-            other => {
-                if let Some(inverse) = self.mutate(other) {
+            _ => {
+                if let Some(inverse) = self.mutate(&action) {
                     self.history.record(inverse);
                 }
-                None
+                Some(action)
             }
         }
     }
 
-    /// The pure primitive step — no history bookkeeping, never sees `Quit`/`Undo`/`Redo`.
+    /// The pure primitive step: applies one non-undo/redo action and reports its inverse, with no
+    /// history bookkeeping of its own. Shared by `update`'s three cases (a fresh action, and
+    /// replaying an inverse for `Undo` or `Redo`) so the actual mutation logic exists once, not
+    /// three times — `update` is still the only *public* entry point.
     fn mutate(&mut self, action: &Action) -> Option<Action> {
         match action {
             Action::SetSelection(new) => {
                 self.selection = new.clone().normalized();
                 // Moving the selection isn't undoable — matching how editors generally treat
                 // cursor movement (Ctrl-Z reaches past it to the last real edit).
+                None
+            }
+            Action::SetMode(mode) => {
+                self.mode = *mode;
+                if *mode != Mode::Command {
+                    self.command_line.clear();
+                }
+                None // mode switches aren't undoable either.
+            }
+            Action::SetCommandLine(text) => {
+                self.command_line.clone_from(text);
                 None
             }
             Action::Playback(playback_action) => {
@@ -94,11 +107,17 @@ impl Editor {
     }
 }
 
+impl Default for Editor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::Position;
     use crate::playback::{PlaybackAction, TrackId};
+    use crate::track::Position;
 
     fn insert_a4_at(tick: u16) -> Action {
         Action::Playback(PlaybackAction::InsertNote {
@@ -113,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_fresh_editor_starts_paused_with_no_notes() {
-        let editor = Editor::new(Tick(16));
+        let editor = Editor::new();
         assert_eq!(
             editor.playback.transport.intent,
             crate::transport::PlaybackIntent::Paused
@@ -125,17 +144,18 @@ mod tests {
     }
 
     #[test]
-    fn update_returns_none_for_a_fresh_action() {
-        let mut editor = Editor::new(Tick(16));
-        assert_eq!(editor.update(&insert_a4_at(0)), None);
+    fn update_echoes_back_a_fresh_action() {
+        let mut editor = Editor::new();
+        let action = insert_a4_at(0);
+        assert_eq!(editor.update(action.clone()), Some(action));
     }
 
     #[test]
     fn undo_reverses_the_most_recent_action() {
-        let mut editor = Editor::new(Tick(16));
-        editor.update(&insert_a4_at(0));
+        let mut editor = Editor::new();
+        editor.update(insert_a4_at(0));
 
-        editor.update(&Action::Undo);
+        editor.update(Action::Undo);
 
         assert_eq!(
             editor.playback.tracks.first().sounding_at(Tick(0)).count(),
@@ -145,11 +165,11 @@ mod tests {
 
     #[test]
     fn redo_reapplies_an_undone_action() {
-        let mut editor = Editor::new(Tick(16));
-        editor.update(&insert_a4_at(0));
-        editor.update(&Action::Undo);
+        let mut editor = Editor::new();
+        editor.update(insert_a4_at(0));
+        editor.update(Action::Undo);
 
-        editor.update(&Action::Redo);
+        editor.update(Action::Redo);
 
         assert_eq!(
             editor.playback.tracks.first().sounding_at(Tick(0)).count(),
@@ -158,17 +178,14 @@ mod tests {
     }
 
     #[test]
-    fn moving_the_selection_is_not_undoable() {
-        let mut editor = Editor::new(Tick(16));
-        let moved = Selection::single(Range {
-            pitch: Pitch::A4,
-            anchor: Tick(1),
-            head: Tick(1),
-        });
+    fn leaving_command_mode_clears_the_command_line() {
+        let mut editor = Editor::new();
+        editor.update(Action::SetMode(Mode::Command));
+        editor.update(Action::SetCommandLine("quit".to_string()));
 
-        editor.update(&Action::SetSelection(moved));
-        editor.update(&Action::Undo); // nothing to undo — the move wasn't recorded
+        editor.update(Action::SetMode(Mode::Normal));
 
-        assert_eq!(editor.selection.primary().anchor, Tick(1));
+        assert_eq!(editor.mode, Mode::Normal);
+        assert_eq!(editor.command_line, "");
     }
 }
