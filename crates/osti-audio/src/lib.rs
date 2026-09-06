@@ -1,6 +1,4 @@
 //! Audio I/O for `osti`.
-//!
-//! Owns talking to the audio device.
 
 use std::{
     fmt,
@@ -29,10 +27,6 @@ const DUTY: f64 = 0.5;
 const GATE_STARTS_ON: bool = 0.0 < DUTY;
 
 /// How long an on/off transition takes to fade, instead of switching instantly.
-///
-/// The gate flips at a fixed point in time, unrelated to where the tone's waveform happens to be;
-/// jumping straight to/from silence there is an amplitude discontinuity, heard as a click. A few
-/// milliseconds of fade removes the discontinuity without being long enough to blur the rhythm.
 const RAMP_SECS: f64 = 0.005;
 
 /// Build the tone signal for a given sample rate.
@@ -68,16 +62,7 @@ impl NoteState {
         }
     }
 
-    // Fill a buffer of interleaved frames from the tone, scaled by `level`, which chases the
-    // gate's on/off target by at most `ramp_step` each frame rather than jumping straight to it
-    // (see `RAMP_SECS`). The tone and gate are stepped once per frame, not once per sample, so
-    // multi-channel output isn't sped up; every channel of a frame gets the same value. The tone
-    // is always stepped, even while muted, so its pitch stays accurate to real elapsed time.
-    // Returns whether the gate was on by the end of the buffer, or its prior state if the buffer
-    // had no frames (or `channels` is zero).
     fn fill<T: Sample + FromSample<f64>>(&mut self, data: &mut [T], channels: usize) -> bool {
-        // `chunks_mut` panics on a zero chunk size; a device reporting zero channels shouldn't
-        // crash the audio thread over it.
         if channels != 0 {
             for frame in data.chunks_mut(channels) {
                 let tone_value = self.tone.next();
@@ -95,8 +80,6 @@ impl NoteState {
     }
 }
 
-// Log a stream error and mark the note off, since the stream may never call the data callback
-// again afterward to report the truth itself.
 fn handle_stream_error(err: &cpal::Error, note_on: &AtomicBool) {
     eprintln!("audio stream error: {err}");
     note_on.store(false, Ordering::Relaxed);
@@ -140,9 +123,6 @@ pub struct NoteLoop {
 
 impl NoteLoop {
     /// Return whether the note is audible right now.
-    ///
-    /// Updated once per audio buffer, not per sample (plenty precise for anything watching it
-    /// at UI-frame granularity).
     #[must_use]
     pub fn is_note_on(&self) -> bool {
         self.note_on.load(Ordering::Relaxed)

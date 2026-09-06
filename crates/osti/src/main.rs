@@ -12,8 +12,6 @@ use osti_tui::DefaultTerminal;
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
 
 /// Command-line arguments.
-// `about` pulls its text from Cargo.toml's description, already the same sentence as the crate
-// doc comment above; no need for a third copy here.
 #[derive(Parser)]
 #[command(about, author, version)]
 struct Cli;

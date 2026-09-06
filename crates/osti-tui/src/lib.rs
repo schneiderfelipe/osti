@@ -1,7 +1,4 @@
 //! Terminal UI for `osti`.
-//!
-//! Owns talking to the terminal: entering and leaving the alternate screen, reading input, and
-//! rendering.
 
 use std::{io, time::Duration};
 
@@ -19,8 +16,6 @@ pub fn init() -> io::Result<DefaultTerminal> {
 }
 
 /// Restore the terminal to its original state.
-///
-/// Any failure is reported to stderr rather than returned or panicked on.
 pub fn restore() {
     ratatui::restore();
 }
