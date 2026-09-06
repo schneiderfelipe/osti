@@ -1,0 +1,246 @@
+//! Audio-relevant state, and its own action type — replicated onto the audio thread by applying
+//! the same actions there, rather than by sharing memory or sending snapshots.
+
+use nonempty::NonEmpty;
+
+use crate::pattern::{Pattern, Position};
+use crate::time::{Length, Tick};
+use crate::transport::{PlaybackIntent, Transport};
+
+/// Which track, among a [`Playback`]'s tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TrackId(pub u8);
+
+/// Everything the audio thread needs to play.
+///
+/// One or more tracks (always at least one — a `Playback` playing nothing isn't worth
+/// representing separately from "one empty track"), all sharing one transport: starting playback
+/// starts every track at once, since transport applies to the whole `Playback`, not per track.
+#[derive(Debug, Clone)]
+pub struct Playback {
+    /// The tracks being played, together.
+    pub tracks: NonEmpty<Pattern>,
+    /// The shared transport.
+    pub transport: Transport,
+}
+
+impl Playback {
+    /// One empty track, `length` ticks long, not playing.
+    #[must_use]
+    pub fn new(length: Tick) -> Self {
+        Self {
+            tracks: NonEmpty::new(Pattern::new(length)),
+            transport: Transport::default(),
+        }
+    }
+
+    fn track_mut(&mut self, track: TrackId) -> &mut Pattern {
+        &mut self.tracks[usize::from(track.0)]
+    }
+}
+
+/// An action that changes [`Playback`]'s state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlaybackAction {
+    /// Place a note, replacing whatever same-pitch notes it overlaps.
+    InsertNote {
+        /// Which track.
+        track: TrackId,
+        /// Where and at what pitch.
+        at: Position,
+        /// How long it lasts.
+        length: Length,
+    },
+    /// Remove the note at a position, if any.
+    RemoveNote {
+        /// Which track.
+        track: TrackId,
+        /// Where to remove from.
+        at: Position,
+    },
+    /// Start or pause the transport.
+    SetPlaybackIntent(PlaybackIntent),
+    /// Move the transport's position.
+    Seek(Tick),
+    /// Apply several actions in order, as one.
+    Batch(Box<NonEmpty<Self>>),
+}
+
+impl PlaybackAction {
+    /// Combine several actions into one atomic batch — how a multi-cursor edit is built, one
+    /// action per range in the selection. `None` for an empty input: there's nothing to batch,
+    /// and an empty batch isn't a representable state to begin with.
+    #[must_use]
+    pub fn batch(actions: impl IntoIterator<Item = Self>) -> Option<Self> {
+        NonEmpty::from_vec(actions.into_iter().collect())
+            .map(|actions| Self::Batch(Box::new(actions)))
+    }
+}
+
+impl Playback {
+    /// Apply one action, returning its inverse if it's undoable.
+    ///
+    /// `None` covers two different but related cases: the action isn't undoable at all (the
+    /// transport controls — matching how real transport controls behave elsewhere, undoing
+    /// "pressed play" doesn't rewind anything), or it was undoable in principle but had nothing
+    /// to undo (removing a note that wasn't there).
+    ///
+    /// # Panics
+    ///
+    /// Never, in practice — the one internal `unwrap` only fails on an empty `Vec`, and it's only
+    /// reached right after pushing at least one element onto it.
+    pub fn apply(&mut self, action: &PlaybackAction) -> Option<PlaybackAction> {
+        match action {
+            PlaybackAction::InsertNote { track, at, length } => {
+                let removed = self.track_mut(*track).insert(*at, *length);
+                let undo_insert = PlaybackAction::RemoveNote {
+                    track: *track,
+                    at: *at,
+                };
+                if removed.is_empty() {
+                    Some(undo_insert)
+                } else {
+                    let mut inverses: Vec<PlaybackAction> = removed
+                        .into_iter()
+                        .map(|(position, length)| PlaybackAction::InsertNote {
+                            track: *track,
+                            at: position,
+                            length,
+                        })
+                        .collect();
+                    inverses.push(undo_insert);
+                    #[allow(clippy::unwrap_used)] // just pushed at least one element above
+                    Some(PlaybackAction::Batch(Box::new(
+                        NonEmpty::from_vec(inverses).unwrap(),
+                    )))
+                }
+            }
+            PlaybackAction::RemoveNote { track, at } => {
+                self.track_mut(*track)
+                    .remove(*at)
+                    .map(|length| PlaybackAction::InsertNote {
+                        track: *track,
+                        at: *at,
+                        length,
+                    })
+            }
+            PlaybackAction::SetPlaybackIntent(intent) => {
+                self.transport.intent = *intent;
+                None
+            }
+            PlaybackAction::Seek(tick) => {
+                self.transport.position = *tick;
+                None
+            }
+            PlaybackAction::Batch(batch) => {
+                // Revert whatever was undoable and skip what wasn't, rather than making the whole
+                // batch non-undoable because one piece of it isn't — a batch mixing a transport
+                // change with real edits shouldn't silently swallow undo for the edits too.
+                let mut inverses: Vec<PlaybackAction> =
+                    batch.iter().filter_map(|a| self.apply(a)).collect();
+                inverses.reverse();
+                NonEmpty::from_vec(inverses).map(|ne| PlaybackAction::Batch(Box::new(ne)))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pitch::Pitch;
+
+    fn at(tick: u16, pitch: u8) -> Position {
+        Position {
+            tick: Tick(tick),
+            pitch: Pitch(pitch),
+        }
+    }
+
+    #[test]
+    fn inserting_a_note_undoes_to_removing_it() {
+        let mut playback = Playback::new(Tick(16));
+        let insert = PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(0, 60),
+            length: Length(4),
+        };
+
+        let inverse = playback.apply(&insert);
+
+        assert_eq!(
+            inverse,
+            Some(PlaybackAction::RemoveNote {
+                track: TrackId(0),
+                at: at(0, 60)
+            })
+        );
+    }
+
+    #[test]
+    fn removing_nothing_is_not_undoable() {
+        let mut playback = Playback::new(Tick(16));
+        let inverse = playback.apply(&PlaybackAction::RemoveNote {
+            track: TrackId(0),
+            at: at(0, 60),
+        });
+        assert_eq!(inverse, None);
+    }
+
+    #[test]
+    fn transport_actions_are_not_undoable() {
+        let mut playback = Playback::new(Tick(16));
+        let inverse = playback.apply(&PlaybackAction::SetPlaybackIntent(PlaybackIntent::Playing));
+        assert_eq!(inverse, None);
+        assert_eq!(playback.transport.intent, PlaybackIntent::Playing);
+    }
+
+    #[test]
+    fn a_batch_mixing_undoable_and_not_reverts_only_the_undoable_part() {
+        let mut playback = Playback::new(Tick(16));
+        let batch = PlaybackAction::Batch(Box::new(NonEmpty::from((
+            PlaybackAction::InsertNote {
+                track: TrackId(0),
+                at: at(0, 60),
+                length: Length(4),
+            },
+            vec![PlaybackAction::SetPlaybackIntent(PlaybackIntent::Playing)],
+        ))));
+
+        let inverse = playback.apply(&batch);
+
+        assert_eq!(
+            inverse,
+            Some(PlaybackAction::Batch(Box::new(NonEmpty::new(
+                PlaybackAction::RemoveNote {
+                    track: TrackId(0),
+                    at: at(0, 60)
+                }
+            ))))
+        );
+    }
+
+    #[test]
+    fn inserting_over_an_existing_note_undoes_to_restoring_it() {
+        let mut playback = Playback::new(Tick(16));
+        playback.apply(&PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(0, 60),
+            length: Length(8),
+        });
+
+        let inverse = playback.apply(&PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(2, 60),
+            length: Length(2),
+        });
+
+        #[allow(clippy::unwrap_used)] // asserting the precondition the test is set up to satisfy
+        let undo = inverse.unwrap();
+        playback.apply(&undo);
+        // The old, longer note is back, covering tick 2 again (it always did — [0, 8)); what's
+        // gone is the new note that used to occupy this position, and nothing past the old one.
+        assert_eq!(playback.tracks.first().sounding_at(Tick(2)).count(), 1);
+        assert_eq!(playback.tracks.first().sounding_at(Tick(10)).count(), 0);
+    }
+}

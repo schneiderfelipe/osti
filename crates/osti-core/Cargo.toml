@@ -1,0 +1,17 @@
+[package]
+name = "osti-core"
+description = "Domain model for osti: patterns, notes, selection, and the action/undo core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+nonempty = "0.12.0"
