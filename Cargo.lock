@@ -1361,6 +1361,7 @@ name = "osti-tui"
 version = "0.2.0"
 dependencies = [
  "crossterm",
+ "osti-core",
  "ratatui",
 ]
 
