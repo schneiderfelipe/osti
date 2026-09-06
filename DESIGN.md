@@ -5,8 +5,8 @@ It's heavily inspired by [Kakoune's](https://github.com/mawww/kakoune/blob/maste
 
 ## Interactivity
 
-`osti` is always expected to be used interactively: the loop audibly playing and the grid visibly reflecting every edit in real time is the entire premise of the tool.
-This should not prevent `osti` from being used non-interactively (e.g., rendering a composition to an audio file from the command line) but interactive, in-the-moment editing is what the design is built around first.
+`osti` is built for interactive use first: the loop playing audibly and the grid reflecting every edit visibly, in real time, is the whole premise.
+Non-interactive use, like rendering a composition to an audio file from the command line, can follow, but it's secondary.
 
 ## Limited scope
 
@@ -48,10 +48,9 @@ It makes the system easier to reason about, bugs easier to find, and the codebas
 
 ## Unified interactive use and scripting
 
-This follows from orthogonality and simplicity: normal mode is not a layer of keybindings sitting on top of a separate editing language (it *is* the editing language).
-There is no internal command that a key happens to be bound to; the key dispatches the same action a typed command or a recorded macro would dispatch.
-The same has to hold for generated edits, not just typed ones.
-That single action stream is what makes undo and macros just a recording of ordinary use, rather than a second thing to design and maintain.
+This follows from orthogonality and simplicity: normal mode isn't a layer of keybindings on top of a separate editing language, it *is* the editing language.
+A key, a typed command, and a recorded macro all dispatch the same action; no internal command exists that a key merely happens to be bound to.
+Generated edits go through that same action stream, which is what makes undo and macros just a recording of ordinary use, not a second thing to design and maintain.
 
 ## Instrument-agnostic
 

@@ -18,7 +18,7 @@ This document describes what "done" looks like for a first, minimal version of `
 ### Foundation
 
 - [x] Set up the project skeleton: an empty terminal UI and an audio loop, wired together and running
-- [ ] Play a single note back in a loop, audibly and visibly, confirming UI and audio stay in sync
+- [x] Play a single note back in a loop, audibly and visibly, confirming UI and audio stay in sync
 
 ### Composing
 
@@ -62,14 +62,14 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ## Beyond MVP
 
-- [ ] Macros: record and replay a stretch of edits
-- [ ] Which-key guidance: show the keys available for a partially-typed sequence
-- [ ] Non-interactive rendering: render a composition to an audio file from the command line
-- [ ] Deeper sound and mixing, kept secondary to writing and looping patterns
-- [ ] Handing off to specialized tools instead of reimplementing their job
+- [ ] Record and replay a stretch of edits as macros
+- [ ] Show which-key guidance for a partially-typed key sequence
+- [ ] Render a composition to an audio file from the command line (no interactive UI needed)
+- [ ] Deepen sound design and mixing, kept secondary to writing and looping patterns
+- [ ] Hand off to specialized tools instead of reimplementing their job
 
 ## Non-goals
 
 - A binary plugin system.
 - An embedded scripting language.
-- Matching dedicated DAWs at deep sound design or professional mixing.
+- Deep sound design or professional mixing on par with dedicated DAWs.
