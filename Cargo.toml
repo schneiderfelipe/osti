@@ -4,6 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 version = "0.2.0"
+authors = ["Felipe S. S. Schneider <schneider.felipe.5@gmail.com>"]
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/schneiderfelipe/osti"

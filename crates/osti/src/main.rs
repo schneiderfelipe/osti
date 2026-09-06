@@ -10,9 +10,11 @@ use osti_tui::DefaultTerminal;
 /// How often the UI redraws on its own, to reflect the note's state changing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
 
-/// Command-line arguments, currently just `--help`/`--version`.
+/// `osti`: a terminal, keyboard-driven, modal tool for composing music.
+///
+/// Currently accepts no arguments beyond `--help`/`--version`.
 #[derive(Parser)]
-#[command(version, about)]
+#[command(version, author)]
 struct Cli;
 
 fn main() -> Result<()> {
