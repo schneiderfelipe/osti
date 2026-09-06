@@ -11,7 +11,9 @@ use osti_tui::DefaultTerminal;
 /// How often the UI redraws on its own, to reflect the note's state changing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
 
-/// A terminal, keyboard-driven, modal tool for composing music.
+/// Command-line arguments.
+// `about` pulls its text from Cargo.toml's description, already the same sentence as the crate
+// doc comment above; no need for a third copy here.
 #[derive(Parser)]
 #[command(about, author, version)]
 struct Cli;
