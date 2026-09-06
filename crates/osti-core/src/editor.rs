@@ -8,6 +8,7 @@ use crate::playback::Playback;
 use crate::range::Range;
 use crate::selection::Selection;
 use crate::time::Tick;
+use crate::track::Position;
 
 /// The full state of one editing session — the top-level Elm-style model, `Playback` (see there)
 /// nested inside it as the audio-relevant part.
@@ -30,11 +31,10 @@ impl Editor {
     pub fn new() -> Self {
         Self {
             playback: Playback::new(),
-            selection: Selection::single(Range {
+            selection: Selection::single(Range::at(Position {
+                tick: Tick(0),
                 pitch: Pitch::A4,
-                anchor: Tick(0),
-                head: Tick(0),
-            }),
+            })),
             mode: Mode::default(),
             command_line: String::new(),
             history: History::default(),

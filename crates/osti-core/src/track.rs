@@ -37,10 +37,7 @@ impl Track {
 
     /// Every note whose span covers `tick`, at any pitch — zero, one, or several (a chord).
     pub fn sounding_at(&self, tick: Tick) -> impl Iterator<Item = (Position, Length)> + '_ {
-        let window = window(Position {
-            tick,
-            pitch: Pitch(u8::MIN),
-        });
+        let window = window(tick, tick);
         self.notes
             .range(window)
             .filter(move |&(&position, &length)| covers(position, length, tick))
@@ -50,7 +47,11 @@ impl Track {
     /// Every note at `pitch` overlapping `[at, at + length)`.
     fn overlapping(&self, pitch: Pitch, at: Tick, length: Length) -> Vec<(Position, Length)> {
         let end = at.0.saturating_add(u16::from(length.0));
-        let window = window(Position { tick: at, pitch });
+        // A candidate can start anywhere from `Length::MAX` ticks before `at` (any earlier and
+        // even the longest possible note couldn't reach `at`) up to `end - 1` (any later and it
+        // starts after `[at, end)` is already over) — not just at or before `at` itself, which
+        // would miss an existing note starting partway through the new one.
+        let window = window(at, Tick(end.saturating_sub(1)));
         self.notes
             .range(window)
             .filter(|&(&position, &len)| {
@@ -80,20 +81,20 @@ impl Track {
     }
 }
 
-/// The narrowest range of the map that could contain anything covering `from` — bounded by
-/// `Length::MAX`, since nothing sounding for longer than that could still start further back.
-fn window(from: Position) -> std::ops::RangeInclusive<Position> {
-    let earliest = Tick(
-        from.tick
-            .0
-            .saturating_sub(u16::from(Length::MAX.0.saturating_sub(1))),
-    );
+/// The narrowest range of the map that could contain a note starting anywhere from
+/// `Length::MAX` ticks before `earliest_start` (any earlier and even the longest possible note
+/// couldn't start late enough to still matter) through `latest_start`, at any pitch.
+fn window(earliest_start: Tick, latest_start: Tick) -> std::ops::RangeInclusive<Position> {
     let lower = Position {
-        tick: earliest,
+        tick: Tick(
+            earliest_start
+                .0
+                .saturating_sub(u16::from(Length::MAX.0.saturating_sub(1))),
+        ),
         pitch: Pitch(u8::MIN),
     };
     let upper = Position {
-        tick: from.tick,
+        tick: latest_start,
         pitch: Pitch(u8::MAX),
     };
     lower..=upper
@@ -124,8 +125,9 @@ mod tests {
     fn sounding_at_finds_a_chord() {
         let mut track = Track::new();
         track.insert(at(0, 60), Length(4));
-        track.insert(at(0, 64), Length(4));
+        let removed = track.insert(at(0, 64), Length(4));
 
+        assert!(removed.is_empty()); // different pitches never conflict
         assert_eq!(track.sounding_at(Tick(2)).count(), 2);
     }
 
@@ -150,11 +152,13 @@ mod tests {
     }
 
     #[test]
-    fn different_pitches_never_conflict() {
+    fn inserting_a_long_note_also_replaces_a_shorter_one_starting_partway_through() {
         let mut track = Track::new();
-        track.insert(at(0, 60), Length(8));
+        track.insert(at(5, 60), Length(2)); // starts *after* the note below, not before it
 
-        let removed = track.insert(at(0, 61), Length(8));
-        assert!(removed.is_empty());
+        let removed = track.insert(at(0, 60), Length(10));
+
+        assert_eq!(removed, vec![(at(5, 60), Length(2))]);
+        assert_eq!(track.sounding_at(Tick(5)).count(), 1); // only the new, longer note remains
     }
 }
