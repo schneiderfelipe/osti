@@ -28,11 +28,14 @@ const DUTY: f64 = 0.5;
 /// Whether the gate is on at the very start of a cycle, i.e. at phase 0.0.
 const GATE_STARTS_ON: bool = 0.0 < DUTY;
 
-/// Build the tone and gate-phase signals for a given sample rate.
-fn signals(sample_rate: f64) -> (Sine<ConstHz>, Phase<ConstHz>) {
-    let tone = rate(sample_rate).const_hz(FREQUENCY_HZ).sine();
-    let gate_phase = rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase();
-    (tone, gate_phase)
+/// Build the tone signal for a given sample rate.
+fn tone(sample_rate: f64) -> Sine<ConstHz> {
+    rate(sample_rate).const_hz(FREQUENCY_HZ).sine()
+}
+
+/// Build the gate-phase signal for a given sample rate.
+fn gate_phase(sample_rate: f64) -> Phase<ConstHz> {
+    rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase()
 }
 
 // Fill a buffer of interleaved frames from `tone`, muted whenever `gate_phase`'s fractional
@@ -80,7 +83,7 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
 ) -> Result<Stream, cpal::Error> {
     let sample_rate = f64::from(config.sample_rate);
     let channels = usize::from(config.channels);
-    let (mut tone, mut gate_phase) = signals(sample_rate);
+    let (mut tone, mut gate_phase) = (tone(sample_rate), gate_phase(sample_rate));
     let mut on = GATE_STARTS_ON;
     let err_fn = {
         let note_on = Arc::clone(&note_on);
@@ -176,28 +179,18 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use dasp_signal::{ConstHz, Phase, Signal, Sine};
+    use dasp_signal::Signal;
 
     use super::*;
 
     const SAMPLE_RATE: f64 = 44_100.0;
-
-    // fill_note takes concrete signal types, so these stay concrete too (an `impl Signal` return
-    // wouldn't satisfy that parameter type).
-    fn tone() -> Sine<ConstHz> {
-        signals(SAMPLE_RATE).0
-    }
-
-    fn gate_phase() -> Phase<ConstHz> {
-        signals(SAMPLE_RATE).1
-    }
 
     #[test]
     // Comparing against a hardcoded EQUILIBRIUM, not a computed value, so exactness is correct.
     #[allow(clippy::float_cmp)]
     fn fill_note_writes_silence_when_off() {
         let mut buffer = [1.0_f32; 4];
-        let mut gate_phase = gate_phase();
+        let mut gate_phase = gate_phase(SAMPLE_RATE);
         // Step past the duty cycle's end, with a small margin against rounding at the boundary.
         // Small, known-non-negative values, so the truncation is exact and the sign is moot.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -207,7 +200,13 @@ mod tests {
         }
         let mut on = true;
 
-        fill_note(&mut buffer, 1, &mut tone(), &mut gate_phase, &mut on);
+        fill_note(
+            &mut buffer,
+            1,
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase,
+            &mut on,
+        );
 
         assert!(!on);
         assert!(buffer.iter().all(|&s| s == 0.0));
@@ -230,7 +229,13 @@ mod tests {
         let mut buffer = [0.0_f32; 4];
         let mut on = true;
 
-        fill_note(&mut buffer, 0, &mut tone(), &mut gate_phase(), &mut on);
+        fill_note(
+            &mut buffer,
+            0,
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase(SAMPLE_RATE),
+            &mut on,
+        );
 
         assert!(on, "left untouched, same as an empty buffer");
     }
@@ -240,7 +245,13 @@ mod tests {
         let mut buffer = [0_i16; 4];
         let mut on = false;
 
-        fill_note(&mut buffer, 1, &mut tone(), &mut gate_phase(), &mut on);
+        fill_note(
+            &mut buffer,
+            1,
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase(SAMPLE_RATE),
+            &mut on,
+        );
 
         assert!(on);
         assert!(buffer.iter().any(|&s| s != 0));
@@ -253,7 +264,13 @@ mod tests {
         let mut buffer = [0.0_f32; 8]; // 4 stereo frames
         let mut on = false;
 
-        fill_note(&mut buffer, 2, &mut tone(), &mut gate_phase(), &mut on);
+        fill_note(
+            &mut buffer,
+            2,
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase(SAMPLE_RATE),
+            &mut on,
+        );
 
         for frame in buffer.chunks(2) {
             assert_eq!(frame[0], frame[1]);
@@ -266,15 +283,21 @@ mod tests {
         // twice as far through its cycle after the same number of stereo frames.
         let mut mono = [0.0_f32; 4];
         let mut mono_on = false;
-        fill_note(&mut mono, 1, &mut tone(), &mut gate_phase(), &mut mono_on);
+        fill_note(
+            &mut mono,
+            1,
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase(SAMPLE_RATE),
+            &mut mono_on,
+        );
 
         let mut stereo = [0.0_f32; 8];
         let mut stereo_on = false;
         fill_note(
             &mut stereo,
             2,
-            &mut tone(),
-            &mut gate_phase(),
+            &mut tone(SAMPLE_RATE),
+            &mut gate_phase(SAMPLE_RATE),
             &mut stereo_on,
         );
 
@@ -284,8 +307,8 @@ mod tests {
     #[test]
     fn fill_note_keeps_toggling_across_many_cycles() {
         let mut buffer = [0.0_f32; 512];
-        let mut tone = tone();
-        let mut gate_phase = gate_phase();
+        let mut tone = tone(SAMPLE_RATE);
+        let mut gate_phase = gate_phase(SAMPLE_RATE);
         let mut on = false;
 
         // A handful of cycles is enough to see both states; dasp_signal's Phase wraps every step
