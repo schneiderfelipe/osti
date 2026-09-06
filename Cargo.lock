@@ -1335,6 +1335,7 @@ dependencies = [
  "clap",
  "color-eyre",
  "osti-audio",
+ "osti-core",
  "osti-tui",
 ]
 
