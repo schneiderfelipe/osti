@@ -28,6 +28,13 @@ const DUTY: f64 = 0.5;
 /// Whether the gate is on at the very start of a cycle, i.e. at phase 0.0.
 const GATE_STARTS_ON: bool = 0.0 < DUTY;
 
+/// How long an on/off transition takes to fade, instead of switching instantly.
+///
+/// The gate flips at a fixed point in time, unrelated to where the tone's waveform happens to be;
+/// jumping straight to/from silence there is an amplitude discontinuity, heard as a click. A few
+/// milliseconds of fade removes the discontinuity without being long enough to blur the rhythm.
+const RAMP_SECS: f64 = 0.005;
+
 /// Build the tone signal for a given sample rate.
 fn tone(sample_rate: f64) -> Sine<ConstHz> {
     rate(sample_rate).const_hz(FREQUENCY_HZ).sine()
@@ -38,33 +45,53 @@ fn gate_phase(sample_rate: f64) -> Phase<ConstHz> {
     rate(sample_rate).const_hz(1.0 / PERIOD_SECS).phase()
 }
 
-// Fill a buffer of interleaved frames from `tone`, muted whenever `gate_phase`'s fractional
-// cycle position (which wraps every step) falls outside the duty cycle. `tone` and `gate_phase`
-// are stepped once per frame, not once per sample, so multi-channel output isn't sped up; every
-// channel of a frame gets the same value. `tone` is always stepped, even while muted, so its
-// pitch stays accurate to real elapsed time. Reports whether the note was on by the end of the
-// buffer, or the loop's prior state if the buffer had no frames (or `channels` is zero).
-fn fill_note<T: Sample + FromSample<f64>>(
-    data: &mut [T],
-    channels: usize,
-    tone: &mut Sine<ConstHz>,
-    gate_phase: &mut Phase<ConstHz>,
-    note_on: &mut bool,
-) {
-    // `chunks_mut` panics on a zero chunk size; a device reporting zero channels shouldn't crash
-    // the audio thread over it.
-    if channels == 0 {
-        return;
+/// The oscillator, its on/off gate, and the fade level between them, stepped one frame at a time.
+struct NoteState {
+    tone: Sine<ConstHz>,
+    gate_phase: Phase<ConstHz>,
+    /// How much `level` moves toward the gate's target each frame.
+    ramp_step: f64,
+    /// Current fade level, between 0.0 (silent) and 1.0 (the gate's full-on amplitude).
+    level: f64,
+    note_on: bool,
+}
+
+impl NoteState {
+    /// Build a note that starts silent, fading in as soon as the gate first turns on.
+    fn new(sample_rate: f64) -> Self {
+        Self {
+            tone: tone(sample_rate),
+            gate_phase: gate_phase(sample_rate),
+            ramp_step: 1.0 / (RAMP_SECS * sample_rate),
+            level: 0.0,
+            note_on: GATE_STARTS_ON,
+        }
     }
-    for frame in data.chunks_mut(channels) {
-        let tone_value = tone.next();
-        *note_on = gate_phase.next() < DUTY;
-        let value = if *note_on {
-            T::from_sample(tone_value)
-        } else {
-            T::EQUILIBRIUM
-        };
-        frame.fill(value);
+
+    // Fill a buffer of interleaved frames from the tone, scaled by `level`, which chases the
+    // gate's on/off target by at most `ramp_step` each frame rather than jumping straight to it
+    // (see `RAMP_SECS`). The tone and gate are stepped once per frame, not once per sample, so
+    // multi-channel output isn't sped up; every channel of a frame gets the same value. The tone
+    // is always stepped, even while muted, so its pitch stays accurate to real elapsed time.
+    // Returns whether the gate was on by the end of the buffer, or its prior state if the buffer
+    // had no frames (or `channels` is zero).
+    fn fill<T: Sample + FromSample<f64>>(&mut self, data: &mut [T], channels: usize) -> bool {
+        // `chunks_mut` panics on a zero chunk size; a device reporting zero channels shouldn't
+        // crash the audio thread over it.
+        if channels != 0 {
+            for frame in data.chunks_mut(channels) {
+                let tone_value = self.tone.next();
+                self.note_on = self.gate_phase.next() < DUTY;
+                let target = if self.note_on { 1.0 } else { 0.0 };
+                self.level = if self.level < target {
+                    (self.level + self.ramp_step).min(target)
+                } else {
+                    (self.level - self.ramp_step).max(target)
+                };
+                frame.fill(T::from_sample(tone_value * self.level));
+            }
+        }
+        self.note_on
     }
 }
 
@@ -83,8 +110,7 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
 ) -> Result<Stream, cpal::Error> {
     let sample_rate = f64::from(config.sample_rate);
     let channels = usize::from(config.channels);
-    let (mut tone, mut gate_phase) = (tone(sample_rate), gate_phase(sample_rate));
-    let mut on = GATE_STARTS_ON;
+    let mut note = NoteState::new(sample_rate);
     let err_fn = {
         let note_on = Arc::clone(&note_on);
         move |err| handle_stream_error(&err, &note_on)
@@ -92,9 +118,7 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| {
-            // Safe to call unconditionally: fill_note's loop is a no-op on an empty slice, which
-            // leaves `on` at its last value, exactly the desired behavior.
-            fill_note(data, channels, &mut tone, &mut gate_phase, &mut on);
+            let on = note.fill(data, channels);
             note_on.store(on, Ordering::Relaxed);
         },
         err_fn,
@@ -177,39 +201,81 @@ pub fn play_looping_note() -> Result<NoteLoop, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    use dasp_signal::Signal;
-
     use super::*;
 
     const SAMPLE_RATE: f64 = 44_100.0;
 
     #[test]
-    // Comparing against a hardcoded EQUILIBRIUM, not a computed value, so exactness is correct.
-    #[allow(clippy::float_cmp)]
-    fn fill_note_writes_silence_when_off() {
-        let mut buffer = [1.0_f32; 4];
-        let mut gate_phase = gate_phase(SAMPLE_RATE);
-        // Step past the duty cycle's end, with a small margin against rounding at the boundary.
-        // Small, known-non-negative values, so the truncation is exact and the sign is moot.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let steps_past_duty_cycle = (SAMPLE_RATE * PERIOD_SECS * DUTY) as u64 + 10;
-        for _ in 0..steps_past_duty_cycle {
-            gate_phase.next();
-        }
-        let mut on = true;
+    fn fill_does_not_panic_on_zero_channels() {
+        let mut note = NoteState::new(SAMPLE_RATE);
+        let mut buffer = [0.0_f32; 4];
 
-        fill_note(
-            &mut buffer,
-            1,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase,
-            &mut on,
+        let on = note.fill(&mut buffer, 0);
+
+        assert_eq!(
+            on, GATE_STARTS_ON,
+            "left untouched, same as an empty buffer"
         );
+    }
 
-        assert!(!on);
-        assert!(buffer.iter().all(|&s| s == 0.0));
+    #[test]
+    fn fill_steps_the_gate_once_per_frame_not_per_sample() {
+        // A gate that stepped once per interleaved sample instead of once per frame would be
+        // twice as far through its cycle after the same number of stereo frames as mono ones.
+        let mut mono = NoteState::new(SAMPLE_RATE);
+        let mut mono_buffer = [0.0_f32; 4];
+        let mono_on = mono.fill(&mut mono_buffer, 1);
+
+        let mut stereo = NoteState::new(SAMPLE_RATE);
+        let mut stereo_buffer = [0.0_f32; 8]; // 4 stereo frames
+        let stereo_on = stereo.fill(&mut stereo_buffer, 2);
+
+        assert_eq!(mono_on, stereo_on);
+    }
+
+    #[test]
+    // Computed from exact binary fractions (1.0 and a power-of-two-friendly step), so equality
+    // holds precisely.
+    #[allow(clippy::float_cmp)]
+    fn fill_ramps_the_level_instead_of_cutting_it_when_the_gate_turns_off() {
+        let mut note = NoteState {
+            tone: tone(SAMPLE_RATE),
+            gate_phase: gate_phase(SAMPLE_RATE),
+            ramp_step: 0.25,
+            level: 1.0,
+            note_on: true,
+        };
+        // Push the gate right up to the duty cycle's end, so the very next frame turns it off.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let steps_to_duty_cycle = (SAMPLE_RATE * PERIOD_SECS * DUTY) as u64;
+        for _ in 0..steps_to_duty_cycle {
+            note.gate_phase.next();
+        }
+
+        note.fill(&mut [0.0_f32; 1], 1);
+
+        // A hard cut would drop `level` straight to 0.0; ramping moves it by one step instead.
+        assert!(!note.note_on);
+        assert_eq!(note.level, 1.0 - note.ramp_step);
+    }
+
+    #[test]
+    fn fill_settles_to_silence_once_ramped_off() {
+        let mut note = NoteState::new(SAMPLE_RATE);
+        let mut buffer = [1_i16; 1];
+
+        // Run through the on phase (long enough to fully ramp in) and past the end of the
+        // following off phase's ramp, with a small margin for rounding at each boundary.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let on_frames = (SAMPLE_RATE * PERIOD_SECS * DUTY) as u64;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let ramp_frames = (SAMPLE_RATE * RAMP_SECS) as u64;
+        for _ in 0..(on_frames + ramp_frames + 10) {
+            note.fill(&mut buffer, 1);
+        }
+
+        assert!(!note.note_on);
+        assert_eq!(buffer, [0]);
     }
 
     #[test]
@@ -222,109 +288,5 @@ mod tests {
         );
 
         assert!(!note_on.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn fill_note_does_not_panic_on_zero_channels() {
-        let mut buffer = [0.0_f32; 4];
-        let mut on = true;
-
-        fill_note(
-            &mut buffer,
-            0,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase(SAMPLE_RATE),
-            &mut on,
-        );
-
-        assert!(on, "left untouched, same as an empty buffer");
-    }
-
-    #[test]
-    fn fill_note_converts_the_tone_to_i16_samples_when_on() {
-        let mut buffer = [0_i16; 4];
-        let mut on = false;
-
-        fill_note(
-            &mut buffer,
-            1,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase(SAMPLE_RATE),
-            &mut on,
-        );
-
-        assert!(on);
-        assert!(buffer.iter().any(|&s| s != 0));
-    }
-
-    #[test]
-    // Both channels are written from the very same computed value, so exactness is correct.
-    #[allow(clippy::float_cmp)]
-    fn fill_note_writes_every_channel_of_a_frame_alike() {
-        let mut buffer = [0.0_f32; 8]; // 4 stereo frames
-        let mut on = false;
-
-        fill_note(
-            &mut buffer,
-            2,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase(SAMPLE_RATE),
-            &mut on,
-        );
-
-        for frame in buffer.chunks(2) {
-            assert_eq!(frame[0], frame[1]);
-        }
-    }
-
-    #[test]
-    fn fill_note_steps_the_gate_once_per_frame_not_per_sample() {
-        // A gate that stepped once per interleaved sample instead of once per frame would be
-        // twice as far through its cycle after the same number of stereo frames.
-        let mut mono = [0.0_f32; 4];
-        let mut mono_on = false;
-        fill_note(
-            &mut mono,
-            1,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase(SAMPLE_RATE),
-            &mut mono_on,
-        );
-
-        let mut stereo = [0.0_f32; 8];
-        let mut stereo_on = false;
-        fill_note(
-            &mut stereo,
-            2,
-            &mut tone(SAMPLE_RATE),
-            &mut gate_phase(SAMPLE_RATE),
-            &mut stereo_on,
-        );
-
-        assert_eq!(mono_on, stereo_on);
-    }
-
-    #[test]
-    fn fill_note_keeps_toggling_across_many_cycles() {
-        let mut buffer = [0.0_f32; 512];
-        let mut tone = tone(SAMPLE_RATE);
-        let mut gate_phase = gate_phase(SAMPLE_RATE);
-        let mut on = false;
-
-        // A handful of cycles is enough to see both states; dasp_signal's Phase wraps every step
-        // by construction; this just confirms our own glue code passes that through correctly.
-        let mut saw_on = false;
-        let mut saw_off = false;
-        for _ in 0..300 {
-            fill_note(&mut buffer, 1, &mut tone, &mut gate_phase, &mut on);
-            if on {
-                saw_on = true;
-            } else {
-                saw_off = true;
-            }
-        }
-
-        assert!(saw_on);
-        assert!(saw_off);
     }
 }
