@@ -1,20 +1,19 @@
-//! `osti`: a terminal, keyboard-driven, modal tool for composing music.
+//! A terminal, keyboard-driven, modal tool for composing music.
 
 use std::time::Duration;
 
 use clap::Parser;
 use color_eyre::Result;
+
 use osti_audio::NoteLoop;
 use osti_tui::DefaultTerminal;
 
 /// How often the UI redraws on its own, to reflect the note's state changing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
 
-/// `osti`: a terminal, keyboard-driven, modal tool for composing music.
-///
-/// Currently accepts no arguments beyond `--help`/`--version`.
+/// A terminal, keyboard-driven, modal tool for composing music.
 #[derive(Parser)]
-#[command(version, author)]
+#[command(about, author, version)]
 struct Cli;
 
 fn main() -> Result<()> {
@@ -43,5 +42,16 @@ fn run(terminal: &mut DefaultTerminal, audio_loop: Option<&NoteLoop>) -> Result<
         {
             return Ok(());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_cli() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
     }
 }

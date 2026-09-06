@@ -63,7 +63,7 @@ pub fn is_quit(key: KeyEvent) -> bool {
 mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
-    use super::{KeyCode, KeyEvent, KeyModifiers, is_quit, render};
+    use super::*;
 
     #[test]
     fn render_shows_the_note_off() {

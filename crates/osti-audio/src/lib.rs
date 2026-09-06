@@ -178,7 +178,7 @@ mod tests {
 
     use dasp_signal::{ConstHz, Phase, Signal, Sine};
 
-    use super::{DUTY, PERIOD_SECS, fill_note, handle_stream_error, signals};
+    use super::*;
 
     const SAMPLE_RATE: f64 = 44_100.0;
 
