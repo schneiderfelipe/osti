@@ -21,7 +21,7 @@ pub use range::Range;
 pub use selection::Selection;
 pub use time::{Length, Tick};
 pub use track::{Note, Position, Track};
-pub use transport::{PlaybackIntent, Transport};
+pub use transport::PlaybackIntent;
 
 /// Test-only helpers shared across this crate's own test modules, so a `Position` is built the
 /// same way everywhere instead of each module redefining an identical helper.

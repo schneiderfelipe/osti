@@ -87,14 +87,12 @@ impl PlaybackAction {
     /// it: only the second action onward, if there is one, spills onto the heap.
     #[must_use]
     pub fn batch(actions: impl IntoIterator<Item = Self>) -> Option<Self> {
-        let mut actions = actions.into_iter();
-        let head = actions.next()?;
-        let Some(second) = actions.next() else {
-            return Some(head);
-        };
-        let mut tail = vec![second];
-        tail.extend(actions);
-        Some(Self::Batch(Box::new(NonEmpty { head, tail })))
+        let actions = NonEmpty::collect(actions)?;
+        if actions.tail.is_empty() {
+            Some(actions.head)
+        } else {
+            Some(Self::Batch(Box::new(actions)))
+        }
     }
 }
 

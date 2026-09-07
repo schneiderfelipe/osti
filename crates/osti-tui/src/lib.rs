@@ -58,6 +58,12 @@ impl Viewport {
             ticks: Tick(0)..Tick(cols),
         }
     }
+
+    /// The visible tick columns, low to high — the one place that turns the raw `Tick` range into
+    /// an iterator, so nothing else re-derives it by hand.
+    fn ticks(&self) -> impl Iterator<Item = Tick> + '_ {
+        (self.ticks.start.0..self.ticks.end.0).map(Tick)
+    }
 }
 
 /// Initialize the terminal for interactive use, installing a panic hook that restores it.
@@ -180,8 +186,9 @@ fn ruler_row(
     viewport: &Viewport,
     mut cell: impl FnMut(Tick) -> Option<&'static str>,
 ) -> Line<'static> {
-    let cells = (viewport.ticks.start.0..viewport.ticks.end.0)
-        .map(|raw_tick| Span::raw(cell(Tick(raw_tick)).unwrap_or(" ")));
+    let cells = viewport
+        .ticks()
+        .map(|tick| Span::raw(cell(tick).unwrap_or(" ")));
     row(label, cells)
 }
 
@@ -192,8 +199,9 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
 
     // One bounded query per visible tick, not one per (pitch, tick) cell below — every row reuses
     // this instead of re-querying the same tick's chord once per pitch it happens to draw.
-    let chords: Vec<Vec<Note>> = (viewport.ticks.start.0..viewport.ticks.end.0)
-        .map(|raw_tick| track.sounding_at(Tick(raw_tick)).collect())
+    let chords: Vec<Vec<Note>> = viewport
+        .ticks()
+        .map(|tick| track.sounding_at(tick).collect())
         .collect();
     let playing_chord: Vec<Note> = track.sounding_at(playhead).collect();
 
@@ -207,37 +215,33 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
                 .iter()
                 .find(|note| note.position.pitch == pitch)
                 .copied();
-            let cells = chords
-                .iter()
-                .zip(viewport.ticks.start.0..viewport.ticks.end.0)
-                .map(|(chord, raw_tick)| {
-                    let tick = Tick(raw_tick);
-                    let sounding = chord
-                        .iter()
-                        .find(|note| note.position.pitch == pitch)
-                        .copied();
-                    let symbol = match sounding {
-                        Some(note) if note.position.tick == tick => NOTE_START,
-                        Some(_) => NOTE_BODY,
-                        None => EMPTY,
-                    };
+            let cells = chords.iter().zip(viewport.ticks()).map(|(chord, tick)| {
+                let sounding = chord
+                    .iter()
+                    .find(|note| note.position.pitch == pitch)
+                    .copied();
+                let symbol = match sounding {
+                    Some(note) if note.position.tick == tick => NOTE_START,
+                    Some(_) => NOTE_BODY,
+                    None => EMPTY,
+                };
 
-                    let mut style = Style::default();
-                    if playing.is_some_and(|note| note.covers(tick)) {
-                        style = style.fg(PLAYING_COLOR).add_modifier(Modifier::BOLD);
-                    }
-                    if tick == playhead {
-                        style = style.add_modifier(Modifier::REVERSED);
-                    }
-                    if editor
-                        .selection
-                        .ranges()
-                        .any(|range| range.covers(Position { tick, pitch }))
-                    {
-                        style = style.add_modifier(Modifier::UNDERLINED);
-                    }
-                    Span::styled(symbol, style)
-                });
+                let mut style = Style::default();
+                if playing.is_some_and(|note| note.covers(tick)) {
+                    style = style.fg(PLAYING_COLOR).add_modifier(Modifier::BOLD);
+                }
+                if tick == playhead {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
+                if editor
+                    .selection
+                    .ranges()
+                    .any(|range| range.covers(Position { tick, pitch }))
+                {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                Span::styled(symbol, style)
+            });
             row(&pitch.name(), cells)
         })
         .collect()
@@ -308,7 +312,7 @@ fn render_help(over: Rect, buf: &mut Buffer) {
         .saturating_add(2) as u16;
     #[allow(clippy::cast_possible_truncation)]
     let height = lines.len() as u16 + 2;
-    let area = centered(over, width, height);
+    let area = over.centered(Constraint::Length(width), Constraint::Length(height));
 
     Clear.render(area, buf);
     Paragraph::new(lines)
@@ -331,28 +335,16 @@ fn keys_label(command: Command) -> String {
         .join(" / ")
 }
 
+/// Render one key for the help overlay — `KeyCode` already renders every key sensibly (`Display`)
+/// except the arrows, which read better as their glyphs than as the words "Left"/"Right"/etc. in
+/// a compact keybinding table.
 fn key_label(code: KeyCode) -> String {
-    let label = match code {
-        KeyCode::Char(' ') => "Space",
-        KeyCode::Char(c) => return c.to_string(),
-        KeyCode::Left => "←",
-        KeyCode::Right => "→",
-        KeyCode::Up => "↑",
-        KeyCode::Down => "↓",
-        KeyCode::Esc => "Esc",
-        other => return format!("{other:?}"),
-    };
-    label.to_string()
-}
-
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let width = width.min(area.width);
-    let height = height.min(area.height);
-    Rect {
-        x: area.x + (area.width.saturating_sub(width)) / 2,
-        y: area.y + (area.height.saturating_sub(height)) / 2,
-        width,
-        height,
+    match code {
+        KeyCode::Left => "←".to_string(),
+        KeyCode::Right => "→".to_string(),
+        KeyCode::Up => "↑".to_string(),
+        KeyCode::Down => "↓".to_string(),
+        other => other.to_string(),
     }
 }
 
@@ -633,7 +625,7 @@ fn apply(command: Command, editor: &Editor, viewport: &Viewport) -> Option<Actio
         Command::MoveRight => {
             let max = viewport.ticks.end.0.saturating_sub(1);
             Some(moved_tick(editor, extend, move |range| {
-                Tick((range.head.0 + 1).min(max))
+                Tick(range.head.0.saturating_add(1).min(max))
             }))
         }
         Command::MoveUp => {
