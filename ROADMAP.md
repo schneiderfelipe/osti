@@ -7,7 +7,7 @@ PRs are expected to check off, split, reorder, or rewrite items here as work pro
 
 ## Vision
 
-`osti` is a terminal, keyboard-driven, modal tool for composing music: a sequencer with looper features, good at writing note patterns, looping them, and playing them back on simple synthesized instruments.
+`osti` is a terminal, keyboard-driven, modal tool for composing music: a sequencer with looper features, good at writing tracks, looping them, and playing them back on simple synthesized instruments.
 
 Its editing philosophy follows Helix's lineage (selection-first, noun before verb) and, through Helix, Kakoune's selection model and Neovim's modal-editing and command-line heritage (see [DESIGN.md § Helix, Kakoune, and Neovim lineage](DESIGN.md#helix-kakoune-and-neovim-lineage)).
 
@@ -22,7 +22,7 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ### Composing
 
-- [x] Show a grid of notes and time for one pattern
+- [x] Show a grid of notes and time for a single track
 - [x] Move a selection around the grid
 - [x] Add and remove notes at the current selection
 - [ ] Change a selected note's pitch and duration
@@ -30,14 +30,14 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ### Tracks
 
-- [ ] Hold more than one pattern at a time, each on its own track
+- [ ] Hold more than track at a time
 - [ ] Switch which track is being edited
 - [ ] Play all tracks together, in sync
 
 ### Playback and looping
 
 - [x] Play, pause, and seek without leaving the keyboard
-- [ ] Loop a pattern continuously
+- [ ] Loop a track continuously
 - [ ] Change where a loop starts and ends
 
 ### Instruments
@@ -65,7 +65,7 @@ This document describes what "done" looks like for a first, minimal version of `
 - [ ] Record and replay a stretch of edits as macros
 - [ ] Show which-key guidance for a partially-typed key sequence
 - [ ] Render a composition to an audio file from the command line (no interactive UI needed)
-- [ ] Deepen sound design and mixing, kept secondary to writing and looping patterns
+- [ ] Deepen sound design and mixing, kept secondary to writing and looping tracks
 - [ ] Hand off to specialized tools instead of reimplementing their job
 
 ## Non-goals
