@@ -137,15 +137,23 @@ fn row(label: &str, cells: impl Iterator<Item = Span<'static>>) -> Line<'static>
 const STEPS_PER_BEAT: u16 = 4;
 const BEATS_PER_BAR: u16 = 4;
 
+/// A single decimal digit 1-9, as a `'static` string — free of the heap allocation a `.to_string()`
+/// would cost per cell, per redraw. `STEPS_PER_BEAT`/`BEATS_PER_BAR` staying single digits (see
+/// their own docs) is exactly what keeps `n` in range here.
+fn digit(n: u16) -> &'static str {
+    const DIGITS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+    DIGITS[usize::from(n - 1)]
+}
+
 /// Build the two-row ruler above the grid: which beat, and which step within it — read top to
 /// bottom, coarse to fine, the way a time signature itself is read.
 fn header(viewport: &Viewport) -> [Line<'static>; 2] {
     let beat = ruler_row("beat", viewport, |tick| {
         (tick.0 % STEPS_PER_BEAT == 0)
-            .then(|| (((tick.0 / STEPS_PER_BEAT) % BEATS_PER_BAR) + 1).to_string())
+            .then(|| digit(((tick.0 / STEPS_PER_BEAT) % BEATS_PER_BAR) + 1))
     });
     let step = ruler_row("step", viewport, |tick| {
-        Some(((tick.0 % STEPS_PER_BEAT) + 1).to_string())
+        Some(digit((tick.0 % STEPS_PER_BEAT) + 1))
     });
     [beat, step]
 }
@@ -153,10 +161,10 @@ fn header(viewport: &Viewport) -> [Line<'static>; 2] {
 fn ruler_row(
     label: &str,
     viewport: &Viewport,
-    mut cell: impl FnMut(Tick) -> Option<String>,
+    mut cell: impl FnMut(Tick) -> Option<&'static str>,
 ) -> Line<'static> {
     let cells = (viewport.ticks.start.0..viewport.ticks.end.0)
-        .map(|raw_tick| Span::raw(cell(Tick(raw_tick)).unwrap_or_else(|| " ".to_string())));
+        .map(|raw_tick| Span::raw(cell(Tick(raw_tick)).unwrap_or(" ")));
     row(label, cells)
 }
 
@@ -671,7 +679,6 @@ fn moved_tick(editor: &Editor, extend: bool, mut new_head: impl FnMut(Range) -> 
     Action::SetSelection(
         editor
             .selection
-            .clone()
             .map(|range| range.moved(new_head(range), extend)),
     )
 }
@@ -680,7 +687,6 @@ fn moved_pitch(editor: &Editor, mut new_pitch: impl FnMut(Range) -> Pitch) -> Ac
     Action::SetSelection(
         editor
             .selection
-            .clone()
             .map(|range| range.with_pitch(new_pitch(range))),
     )
 }

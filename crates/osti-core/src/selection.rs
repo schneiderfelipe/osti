@@ -29,24 +29,31 @@ impl Selection {
     }
 
     /// Move every range the same way — how a movement key affects every cursor in a multi-cursor
-    /// selection at once, not just the primary one.
+    /// selection at once, not just the primary one. Takes `&self`, not `self`: every `Range` is
+    /// `Copy`, so there's nothing building the result needs to consume — callers that only have a
+    /// borrowed `Selection` (the overwhelmingly common case, one per keypress) don't need to
+    /// clone it first just to call this.
     #[must_use]
-    pub fn map(self, f: impl FnMut(Range) -> Range) -> Self {
-        Self(self.0.map(f))
+    pub fn map(&self, mut f: impl FnMut(Range) -> Range) -> Self {
+        Self(NonEmpty {
+            head: f(self.0.head),
+            tail: self.0.tail.iter().map(|&range| f(range)).collect(),
+        })
     }
 
     /// Merge any ranges that overlap or touch on the same pitch.
     ///
     /// Applied whenever the selection changes (see `Editor`'s handling of `SetSelection`), so "no
-    /// two ranges in a selection overlap" holds by construction, not by caller discipline.
+    /// two ranges in a selection overlap" holds by construction, not by caller discipline. Takes
+    /// `&self` for the same reason [`Selection::map`] does.
     ///
     /// # Panics
     ///
     /// Never, in practice — the one internal `unwrap` only fails if `self` were empty, which
     /// `Selection`'s own invariant rules out.
     #[must_use]
-    pub fn normalized(self) -> Self {
-        let mut ranges: Vec<Range> = self.0.into_iter().collect();
+    pub fn normalized(&self) -> Self {
+        let mut ranges: Vec<Range> = self.0.iter().copied().collect();
         ranges.sort_by_key(|range| (range.pitch, range.start()));
 
         let mut iter = ranges.into_iter();
@@ -87,7 +94,7 @@ mod tests {
     fn normalizing_a_single_range_changes_nothing() {
         let selection = Selection::single(range(60, 0, 3));
         assert_eq!(
-            selection.clone().normalized().ranges().collect::<Vec<_>>(),
+            selection.normalized().ranges().collect::<Vec<_>>(),
             selection.ranges().collect::<Vec<_>>()
         );
     }

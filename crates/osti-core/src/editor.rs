@@ -66,7 +66,7 @@ impl Editor {
                 unreachable!("the runtime must intercept `Quit` before calling `update`")
             }
             Action::SetSelection(new) => {
-                self.selection = new.clone().normalized();
+                self.selection = new.normalized();
                 // Moving the selection isn't undoable — matching how editors generally treat
                 // cursor movement (Ctrl-Z reaches past it to the last real edit).
                 None

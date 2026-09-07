@@ -83,15 +83,18 @@ impl PlaybackAction {
     /// action per range in the selection. `None` for an empty input: there's nothing to batch,
     /// and an empty batch isn't a representable state to begin with. A single action is handed
     /// back unwrapped rather than boxed in a one-element batch — the overwhelmingly common case
-    /// (one cursor) shouldn't pay for generality it isn't using.
+    /// (one cursor) shouldn't pay for generality it isn't using, right down to not allocating for
+    /// it: only the second action onward, if there is one, spills onto the heap.
     #[must_use]
     pub fn batch(actions: impl IntoIterator<Item = Self>) -> Option<Self> {
-        let actions = NonEmpty::from_vec(actions.into_iter().collect())?;
-        if actions.tail.is_empty() {
-            Some(actions.head)
-        } else {
-            Some(Self::Batch(Box::new(actions)))
-        }
+        let mut actions = actions.into_iter();
+        let head = actions.next()?;
+        let Some(second) = actions.next() else {
+            return Some(head);
+        };
+        let mut tail = vec![second];
+        tail.extend(actions);
+        Some(Self::Batch(Box::new(NonEmpty { head, tail })))
     }
 }
 
@@ -170,6 +173,33 @@ impl Playback {
 mod tests {
     use super::*;
     use crate::test_support::at;
+
+    #[test]
+    fn batch_of_nothing_is_none() {
+        assert_eq!(PlaybackAction::batch(Vec::new()), None);
+    }
+
+    #[test]
+    fn batch_of_one_is_the_bare_action_not_a_batch() {
+        let action = PlaybackAction::SetPlaybackIntent(PlaybackIntent::Playing);
+        assert_eq!(PlaybackAction::batch([action.clone()]), Some(action));
+    }
+
+    #[test]
+    fn batch_of_several_keeps_them_in_order() {
+        let first = PlaybackAction::SetPlaybackIntent(PlaybackIntent::Playing);
+        let second = PlaybackAction::Seek(Tick(3));
+
+        let batch = PlaybackAction::batch([first.clone(), second.clone()]);
+
+        assert_eq!(
+            batch,
+            Some(PlaybackAction::Batch(Box::new(NonEmpty::from((
+                first,
+                vec![second]
+            )))))
+        );
+    }
 
     #[test]
     fn inserting_a_note_undoes_to_removing_it() {
