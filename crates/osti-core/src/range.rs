@@ -48,7 +48,10 @@ impl Range {
     /// length when inserting at this range.
     #[must_use]
     pub fn length(self) -> Length {
-        let span = self.end().0 - self.start().0 + 1;
+        // `saturating_add`, not `+`: `end - start` can be as large as `u16::MAX` (a range
+        // spanning the whole tick space), and `+ 1` on that would overflow before the clamp
+        // below ever gets a chance to bring it into `Length`'s much smaller range.
+        let span = (self.end().0 - self.start().0).saturating_add(1);
         #[allow(clippy::cast_possible_truncation)] // clamped to u8's range first
         let ticks = span.min(u16::from(u8::MAX)) as u8;
         Length(ticks)
@@ -142,6 +145,16 @@ mod tests {
         };
         assert_eq!(forward.length(), Length(4));
         assert_eq!(backward.length(), Length(4));
+    }
+
+    #[test]
+    fn length_does_not_overflow_for_the_widest_possible_span() {
+        let widest = Range {
+            pitch: Pitch(60),
+            anchor: Tick(0),
+            head: Tick(u16::MAX),
+        };
+        assert_eq!(widest.length(), Length::MAX); // clamped, not panicking or wrapped
     }
 
     #[test]

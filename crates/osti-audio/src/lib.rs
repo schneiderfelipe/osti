@@ -32,10 +32,16 @@ const TICK_SECS: f64 = 0.05;
 /// rhythm.
 const RAMP_SECS: f64 = 0.005;
 
-/// One currently-sounding (or fading-out) pitch on one track.
+/// One currently-sounding (or fading-out) note on one track.
 struct Voice {
     track: TrackId,
     pitch: Pitch,
+    /// Which note this voice belongs to, identified by its own start — not just its pitch, so
+    /// two back-to-back same-pitch notes (no gap between them) are two voices, not one: crossing
+    /// from one note's `start` to the next's is a new note event and gets its own ramp-in, the
+    /// same re-attack a gap between them would already cause, rather than silently sustaining
+    /// through the boundary because the pitch alone still matches.
+    start: Tick,
     tone: Sine<ConstHz>,
     /// Current fade level, between `0.0` (silent) and `1.0` (full amplitude).
     level: f64,
@@ -93,7 +99,12 @@ impl Player {
             return false;
         }
         self.frames_into_tick -= frames_per_tick;
-        self.playback.transport.position = Tick(self.playback.transport.position.0.wrapping_add(1));
+        // Saturates rather than wraps: real looping (going back to an earlier tick on purpose)
+        // is real future work with its own design (see `Tick`'s own docs) — silently wrapping
+        // the whole timeline back to 0 here would look like that feature already existed. This
+        // just stops advancing at the last representable tick instead.
+        self.playback.transport.position =
+            Tick(self.playback.transport.position.0.saturating_add(1));
         true
     }
 
@@ -102,26 +113,33 @@ impl Player {
         for voice in &mut self.voices {
             voice.target = 0.0;
         }
-        let tick = self.playback.transport.position;
-        for (index, track) in self.playback.tracks.iter().enumerate() {
-            #[allow(clippy::cast_possible_truncation)] // realistically far fewer than 256 tracks
-            let track_id = TrackId(index as u8);
-            for note in track.sounding_at(tick) {
-                let pitch = note.position.pitch;
-                if let Some(voice) = self
-                    .voices
-                    .iter_mut()
-                    .find(|voice| voice.track == track_id && voice.pitch == pitch)
-                {
-                    voice.target = 1.0;
-                } else {
-                    self.voices.push(Voice {
-                        track: track_id,
-                        pitch,
-                        tone: rate(self.sample_rate).const_hz(pitch.frequency_hz()).sine(),
-                        level: 0.0,
-                        target: 1.0,
-                    });
+        // Nothing is "sounding" while paused — the transport isn't advancing, so a note that
+        // happened to be sounding at the moment of pause must fade out (via the loop below
+        // leaving every voice's target at the `0.0` just set above) rather than being reaffirmed
+        // to `1.0` every buffer and ringing until playback resumes.
+        if self.playback.transport.intent == PlaybackIntent::Playing {
+            let tick = self.playback.transport.position;
+            for (index, track) in self.playback.tracks.iter().enumerate() {
+                #[allow(clippy::cast_possible_truncation)]
+                // realistically far fewer than 256 tracks
+                let track_id = TrackId(index as u8);
+                for note in track.sounding_at(tick) {
+                    let pitch = note.position.pitch;
+                    let start = note.position.tick;
+                    if let Some(voice) = self.voices.iter_mut().find(|voice| {
+                        voice.track == track_id && voice.pitch == pitch && voice.start == start
+                    }) {
+                        voice.target = 1.0;
+                    } else {
+                        self.voices.push(Voice {
+                            track: track_id,
+                            pitch,
+                            start,
+                            tone: rate(self.sample_rate).const_hz(pitch.frequency_hz()).sine(),
+                            level: 0.0,
+                            target: 1.0,
+                        });
+                    }
                 }
             }
         }
@@ -359,6 +377,46 @@ mod tests {
         player.fill(&mut [1_i16; 1], 1);
 
         assert_eq!(player.voices.len(), 1);
+    }
+
+    #[test]
+    fn pausing_silences_a_sounding_note_instead_of_leaving_it_ringing() {
+        let mut playback = Playback::new();
+        playback.apply(&note(0, 0, 60, 4));
+        playback.transport.intent = PlaybackIntent::Playing;
+        let (mut player, _producer) = new_player(playback);
+
+        // Ramp fully in first — well past the ~220-sample ramp window at this sample rate.
+        player.fill(&mut [0.0_f32; 300], 1);
+        assert_eq!(player.voices.len(), 1, "the note is sounding");
+
+        player.playback.transport.intent = PlaybackIntent::Paused;
+        let mut buffer = [1.0_f32; 300]; // sentinel value, so silence is unambiguous below
+        player.fill(&mut buffer, 1); // well past the ramp window again, still paused
+
+        // The tail of the buffer is silent: the note faded out instead of ringing indefinitely
+        // just because the frozen tick it was sounding at is still technically "current".
+        assert!(buffer[250..].iter().all(|&sample| sample == 0.0));
+    }
+
+    #[test]
+    fn adjacent_same_pitch_notes_retrigger_instead_of_blending() {
+        let mut playback = Playback::new();
+        playback.apply(&note(0, 0, 60, 2)); // covers ticks 0..1
+        playback.apply(&note(0, 2, 60, 2)); // covers ticks 2..3 — adjacent, same pitch
+        playback.transport.intent = PlaybackIntent::Playing;
+        let (mut player, _producer) = new_player(playback);
+
+        // Cross exactly two tick boundaries: into the first note, then into the second.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let frames_per_tick = (44_100.0 * TICK_SECS) as usize;
+        let mut buffer = vec![0.0_f32; frames_per_tick * 2];
+        player.fill(&mut buffer, 1);
+
+        // Right at the boundary: the first note's voice is still fading out (not yet silent)
+        // while the second note's voice has already started ramping in — two voices, not one
+        // continuously-sounding tone straight through the boundary between them.
+        assert_eq!(player.voices.len(), 2);
     }
 
     #[test]

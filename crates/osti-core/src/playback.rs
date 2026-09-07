@@ -107,19 +107,28 @@ impl Playback {
         match action {
             PlaybackAction::InsertNote { track, at, length } => {
                 let removed = self.track_mut(*track).insert(*at, *length);
-                let mut inverses: Vec<PlaybackAction> = removed
-                    .into_iter()
-                    .map(|note| PlaybackAction::InsertNote {
-                        track: *track,
-                        at: note.position,
-                        length: note.length,
-                    })
-                    .collect();
-                inverses.push(PlaybackAction::RemoveNote {
+                // Undo the new note *before* restoring whatever it displaced, not after: a
+                // `Batch` applies its actions in the order they're stored, and restoring a
+                // displaced note first would insert it while the new note is still there —
+                // immediately overlapping it, so `Track::insert` would silently clobber the new
+                // note as a side effect right then, before the `RemoveNote` below ever runs. If a
+                // displaced note happened to start at the exact same position as the new one,
+                // that stray clobber is what the later `RemoveNote` would actually delete: the
+                // just-restored note, not the new one — silently losing it. Undoing the new
+                // note's own insertion first (mirroring how it was the *last* thing the forward
+                // action did) avoids that entirely: the track is back to having neither note
+                // before any restoration runs, so restoring the displaced ones can't collide with
+                // anything.
+                let mut inverses = vec![PlaybackAction::RemoveNote {
                     track: *track,
                     at: *at,
-                });
-                // Always `Some`: `inverses` always has at least the `RemoveNote` just pushed —
+                }];
+                inverses.extend(removed.into_iter().map(|note| PlaybackAction::InsertNote {
+                    track: *track,
+                    at: note.position,
+                    length: note.length,
+                }));
+                // Always `Some`: `inverses` always has at least the `RemoveNote` pushed above —
                 // same collapsing `PlaybackAction::batch` gives every other multi-action caller,
                 // rather than reimplementing it here by hand.
                 PlaybackAction::batch(inverses)
@@ -148,7 +157,10 @@ impl Playback {
                 let mut inverses: Vec<PlaybackAction> =
                     batch.iter().filter_map(|a| self.apply(a)).collect();
                 inverses.reverse();
-                NonEmpty::from_vec(inverses).map(|ne| PlaybackAction::Batch(Box::new(ne)))
+                // Same collapsing every other multi-action inverse goes through — a batch that
+                // happens to reduce to exactly one undoable sub-action shouldn't come back as a
+                // one-element `Batch` any more than `InsertNote`'s own inverse does.
+                PlaybackAction::batch(inverses)
             }
         }
     }
@@ -211,14 +223,14 @@ mod tests {
 
         let inverse = playback.apply(&batch);
 
+        // Just the one surviving inverse, unwrapped — not a one-element `Batch` — same collapsing
+        // `PlaybackAction::batch` gives any other single-action result.
         assert_eq!(
             inverse,
-            Some(PlaybackAction::Batch(Box::new(NonEmpty::new(
-                PlaybackAction::RemoveNote {
-                    track: TrackId(0),
-                    at: at(0, 60)
-                }
-            ))))
+            Some(PlaybackAction::RemoveNote {
+                track: TrackId(0),
+                at: at(0, 60)
+            })
         );
     }
 
@@ -244,5 +256,38 @@ mod tests {
         // gone is the new note that used to occupy this position, and nothing past the old one.
         assert_eq!(playback.tracks.first().sounding_at(Tick(2)).count(), 1);
         assert_eq!(playback.tracks.first().sounding_at(Tick(10)).count(), 0);
+    }
+
+    #[test]
+    fn undoing_an_overlap_clobbering_insert_restores_every_displaced_note() {
+        // Regression test: a note displaced by the insert can start at the exact same position
+        // the new note does. Restoring it *before* undoing the new note's own insertion used to
+        // insert it right on top of the still-present new note, silently clobbering that new note
+        // — which the final `RemoveNote` then deleted, having already been restored, instead of
+        // the new note it was actually meant to remove.
+        let mut playback = Playback::new();
+        playback.apply(&PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(0, 60),
+            length: Length(2),
+        });
+        playback.apply(&PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(3, 60),
+            length: Length(2),
+        });
+
+        let inverse = playback.apply(&PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: at(0, 60),
+            length: Length(6), // swallows both notes above
+        });
+
+        #[allow(clippy::unwrap_used)] // asserting the precondition the test is set up to satisfy
+        playback.apply(&inverse.unwrap());
+
+        // Both displaced notes are back — including the one sharing the new note's own start.
+        assert_eq!(playback.tracks.first().sounding_at(Tick(0)).count(), 1);
+        assert_eq!(playback.tracks.first().sounding_at(Tick(3)).count(), 1);
     }
 }
