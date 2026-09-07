@@ -218,7 +218,7 @@ pub struct PlaybackHandle {
 }
 
 impl PlaybackHandle {
-    /// The transport's current position, as last published by the audio thread.
+    /// Return the transport's current position, as last published by the audio thread.
     #[must_use]
     pub fn current_tick(&self) -> Tick {
         Tick(self.tick_bits.load(Ordering::Relaxed))

@@ -10,20 +10,20 @@ use crate::range::Range;
 pub struct Selection(NonEmpty<Range>);
 
 impl Selection {
-    /// A selection containing just this one range.
+    /// Build a selection containing just this one range.
     #[must_use]
     pub const fn single(range: Range) -> Self {
         Self(NonEmpty::new(range))
     }
 
-    /// The primary range: the one shown distinctly, and the one a future viewport would keep
-    /// scrolled into view.
+    /// Return the primary range: the one shown distinctly, and the one a future viewport would
+    /// keep scrolled into view.
     #[must_use]
     pub const fn primary(&self) -> Range {
         *self.0.first()
     }
 
-    /// Every range in the selection.
+    /// Iterate every range in the selection.
     pub fn ranges(&self) -> impl Iterator<Item = Range> + '_ {
         self.0.iter().copied()
     }

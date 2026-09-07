@@ -29,7 +29,7 @@ pub struct Note {
 }
 
 impl Note {
-    /// The last tick this note covers.
+    /// Return the last tick this note covers.
     #[must_use]
     pub fn end(self) -> Tick {
         Tick(
@@ -41,7 +41,7 @@ impl Note {
         )
     }
 
-    /// Whether this note's span covers `tick`.
+    /// Return whether this note's span covers `tick`.
     #[must_use]
     pub fn covers(self, tick: Tick) -> bool {
         self.position.tick <= tick && tick <= self.end()
@@ -49,7 +49,7 @@ impl Note {
 }
 
 impl From<(&Position, &Length)> for Note {
-    /// Pairs a [`Track`]'s `BTreeMap` entries directly (`(&Position, &Length)`, exactly what its
+    /// Pair a [`Track`]'s `BTreeMap` entries directly (`(&Position, &Length)`, exactly what its
     /// iterators yield), so every query below can build a `Note` with `.map(Note::from)` instead
     /// of repeating the same field-by-field construction.
     fn from((&position, &length): (&Position, &Length)) -> Self {
@@ -70,7 +70,7 @@ pub struct Track {
 }
 
 impl Track {
-    /// An empty track.
+    /// Build an empty track.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -78,7 +78,8 @@ impl Track {
         }
     }
 
-    /// Every note whose span covers `tick`, at any pitch — zero, one, or several (a chord).
+    /// Return every note whose span covers `tick`, at any pitch — zero, one, or several (a
+    /// chord).
     pub fn sounding_at(&self, tick: Tick) -> impl Iterator<Item = Note> + '_ {
         let window = window(tick, tick);
         self.notes
@@ -87,8 +88,8 @@ impl Track {
             .filter(move |note| note.covers(tick))
     }
 
-    /// Every note at `pitch`, in tick order — the one row a selection ever moves along, so this
-    /// is what note-boundary movement (jumping to the previous/next note, like Helix's word
+    /// Return every note at `pitch`, in tick order — the one row a selection ever moves along, so
+    /// this is what note-boundary movement (jumping to the previous/next note, like Helix's word
     /// motions) and span-based edits (deleting everything a multi-tick selection covers) both
     /// build on.
     pub fn notes_at_pitch(&self, pitch: Pitch) -> impl Iterator<Item = Note> + '_ {
@@ -99,7 +100,7 @@ impl Track {
             .map(Note::from)
     }
 
-    /// The start of the nearest note at `pitch` starting before `tick`, if any.
+    /// Return the start of the nearest note at `pitch` starting before `tick`, if any.
     ///
     /// Helix's `b` (jump to the previous word start), for notes: already sitting on or inside a
     /// note jumps to *that* note's start first (its start is still `< tick` unless `tick` is
@@ -112,8 +113,8 @@ impl Track {
             .max()
     }
 
-    /// The end (last covered tick) of the nearest note at `pitch` ending after `tick`, if any —
-    /// Helix's `e`, symmetric to [`Track::previous_note_start`].
+    /// Return the end (last covered tick) of the nearest note at `pitch` ending after `tick`, if
+    /// any — Helix's `e`, symmetric to [`Track::previous_note_start`].
     #[must_use]
     pub fn next_note_end(&self, pitch: Pitch, tick: Tick) -> Option<Tick> {
         self.notes_at_pitch(pitch)
@@ -122,8 +123,8 @@ impl Track {
             .min()
     }
 
-    /// Every note at `pitch` starting within `[start, end]` (inclusive) — everything a (possibly
-    /// multi-tick) selection covers, for deleting more than one note at once. Notes merely
+    /// Return every note at `pitch` starting within `[start, end]` (inclusive) — everything a
+    /// (possibly multi-tick) selection covers, for deleting more than one note at once. Notes merely
     /// overlapping into the span from before `start` are left alone; only where a note *starts*
     /// counts as being in the selection.
     pub fn positions_in_span(
@@ -137,7 +138,7 @@ impl Track {
             .filter(move |position| start <= position.tick && position.tick <= end)
     }
 
-    /// Every note at `pitch` overlapping `[at, at + length)`.
+    /// Return every note at `pitch` overlapping `[at, at + length)`.
     fn overlapping(&self, pitch: Pitch, at: Tick, length: Length) -> Vec<Note> {
         let end = at.0.saturating_add(u16::from(length.0));
         // A candidate can start anywhere from `Length::MAX` ticks before `at` (any earlier and
@@ -172,7 +173,7 @@ impl Track {
     }
 }
 
-/// The narrowest range of the map that could contain a note starting anywhere from
+/// Return the narrowest range of the map that could contain a note starting anywhere from
 /// `Length::MAX` ticks before `earliest_start` (any earlier and even the longest possible note
 /// couldn't start late enough to still matter) through `latest_start`, at any pitch.
 fn window(earliest_start: Tick, latest_start: Tick) -> std::ops::RangeInclusive<Position> {

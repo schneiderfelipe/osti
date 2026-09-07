@@ -26,7 +26,8 @@ pub struct Editor {
 }
 
 impl Editor {
-    /// A fresh editor: one empty track, a single collapsed selection at the start, normal mode.
+    /// Build a fresh editor: one empty track, a single collapsed selection at the start, normal
+    /// mode.
     #[must_use]
     pub fn new() -> Self {
         Self {

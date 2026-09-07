@@ -113,15 +113,15 @@ const PLAYING_COLOR: Color = Color::LightGreen;
 /// The track this UI shows and edits — always the first one, until multi-track UI exists.
 const TRACK: TrackId = TrackId(0);
 
-/// A fixed-width label at the start of a row: a pitch name on a grid row, `"beat"`/`"step"` on
-/// the ruler above it. Right-aligned against one column of padding — the `4` here, plus that one
-/// column, is `GUTTER_COLS`.
+/// Build the fixed-width label at the start of a row: a pitch name on a grid row,
+/// `"beat"`/`"step"` on the ruler above it. Right-aligned against one column of padding — the `4`
+/// here, plus that one column, is `GUTTER_COLS`.
 fn gutter(label: &str) -> Span<'static> {
     Span::raw(format!("{label:>4} "))
 }
 
-/// One row: its gutter label, followed by one cell per visible tick — the shape shared by every
-/// row this crate draws, ruler and grid alike.
+/// Build one row: its gutter label, followed by one cell per visible tick — the shape shared by
+/// every row this crate draws, ruler and grid alike.
 fn row(label: &str, cells: impl Iterator<Item = Span<'static>>) -> Line<'static> {
     Line::from(
         std::iter::once(gutter(label))
@@ -137,8 +137,8 @@ fn row(label: &str, cells: impl Iterator<Item = Span<'static>>) -> Line<'static>
 const STEPS_PER_BEAT: u16 = 4;
 const BEATS_PER_BAR: u16 = 4;
 
-/// The two-row ruler above the grid: which beat, and which step within it — read top to bottom,
-/// coarse to fine, the way a time signature itself is read.
+/// Build the two-row ruler above the grid: which beat, and which step within it — read top to
+/// bottom, coarse to fine, the way a time signature itself is read.
 fn header(viewport: &Viewport) -> [Line<'static>; 2] {
     let beat = ruler_row("beat", viewport, |tick| {
         (tick.0 % STEPS_PER_BEAT == 0)
@@ -218,7 +218,7 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
         .collect()
 }
 
-/// The status line's badge for a mode: its label, and its own accent color as the badge's
+/// Return the status line's badge for a mode: its label, and its own accent color as the badge's
 /// background — the same idea as Helix's own colored mode indicator (not the same literal
 /// palette, which there depends on the active theme): one glance at the color says which mode
 /// you're in.
@@ -248,8 +248,9 @@ fn status_line(editor: &Editor) -> Line<'static> {
     }
 }
 
-/// The help overlay's content — computed from the same `Command` tables that drive dispatch, not
-/// a separately maintained wall of text that could drift out of sync with the real bindings.
+/// Build the help overlay's content — computed from the same `Command` tables that drive
+/// dispatch, not a separately maintained wall of text that could drift out of sync with the real
+/// bindings.
 fn render_help(frame: &mut Frame<'_>, over: Rect) {
     let mut lines = vec![Line::from("")];
     for (title, commands) in [
@@ -378,8 +379,8 @@ enum Command {
 }
 
 impl Command {
-    /// The key sequences that trigger this command — a chord is one sequence; several sequences
-    /// are alternatives (e.g. `h` or `←`).
+    /// Return the key sequences that trigger this command — a chord is one sequence; several
+    /// sequences are alternatives (e.g. `h` or `←`).
     const fn keys(self) -> &'static [&'static [KeyCode]] {
         use KeyCode::{Char, Down, Esc, Left, Right, Up};
         match self {
@@ -404,7 +405,7 @@ impl Command {
         }
     }
 
-    /// A one-line description, used only by the help overlay.
+    /// Return a one-line description, used only by the help overlay.
     const fn description(self) -> &'static str {
         match self {
             Self::MoveLeft => "move left",
@@ -709,7 +710,7 @@ fn delete_selection(editor: &Editor) -> Option<Action> {
     PlaybackAction::batch(removals).map(Action::Playback)
 }
 
-/// The `:` command line: characters build up `editor.command_line`, `Enter` executes it.
+/// Handle the `:` command line: characters build up `editor.command_line`, `Enter` executes it.
 fn resolve_command(pending: &[KeyEvent], editor: &Editor) -> Resolution {
     let [key] = pending else {
         return Resolution::Cancelled;
@@ -765,7 +766,8 @@ mod tests {
         assert_eq!(viewport.pitches.end().0, Pitch::A4.0 + 4); // 13 - HEADER_ROWS - 1, 10 rows
     }
 
-    /// Where a grid cell for `(tick, pitch)` lands in the rendered buffer, given `viewport`.
+    /// Return where a grid cell for `(tick, pitch)` lands in the rendered buffer, given
+    /// `viewport`.
     fn cell(viewport: &Viewport, tick: u16, pitch: Pitch) -> (u16, u16) {
         let x = GUTTER_COLS + tick;
         let y = HEADER_ROWS + u16::from(viewport.pitches.end().0 - pitch.0);

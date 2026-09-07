@@ -17,7 +17,7 @@ pub enum PlaybackIntent {
 }
 
 impl PlaybackIntent {
-    /// The other state — play/pause always means "switch to whichever I'm not."
+    /// Return the other state — play/pause always means "switch to whichever I'm not."
     #[must_use]
     pub const fn toggled(self) -> Self {
         match self {

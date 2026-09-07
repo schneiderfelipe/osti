@@ -22,7 +22,7 @@ pub struct Range {
 }
 
 impl Range {
-    /// A single-tick range at `position`, collapsed (`anchor == head`).
+    /// Build a single-tick range at `position`, collapsed (`anchor == head`).
     #[must_use]
     pub const fn at(position: Position) -> Self {
         Self {
@@ -32,20 +32,20 @@ impl Range {
         }
     }
 
-    /// The earliest tick the range covers.
+    /// Return the earliest tick the range covers.
     #[must_use]
     pub fn start(self) -> Tick {
         self.anchor.min(self.head)
     }
 
-    /// The latest tick the range covers.
+    /// Return the latest tick the range covers.
     #[must_use]
     pub fn end(self) -> Tick {
         self.anchor.max(self.head)
     }
 
-    /// How many ticks the range spans, inclusive of both ends — this is what sets a new note's
-    /// length when inserting at this range.
+    /// Count how many ticks the range spans, inclusive of both ends — this is what sets a new
+    /// note's length when inserting at this range.
     #[must_use]
     pub fn length(self) -> Length {
         // `saturating_add`, not `+`: `end - start` can be as large as `u16::MAX` (a range
@@ -57,7 +57,7 @@ impl Range {
         Length(ticks)
     }
 
-    /// The grid coordinate this range starts from.
+    /// Return the grid coordinate this range starts from.
     #[must_use]
     pub fn position(self) -> Position {
         Position {
@@ -66,7 +66,7 @@ impl Range {
         }
     }
 
-    /// Whether this range covers `position` — same pitch, and within `[start, end]`.
+    /// Return whether this range covers `position` — same pitch, and within `[start, end]`.
     #[must_use]
     pub fn covers(self, position: Position) -> bool {
         self.pitch == position.pitch && (self.start()..=self.end()).contains(&position.tick)
@@ -96,7 +96,8 @@ impl Range {
         }
     }
 
-    /// Whether `self` and `other` overlap or touch on the same pitch (mergeable into one range).
+    /// Return whether `self` and `other` overlap or touch on the same pitch (mergeable into one
+    /// range).
     #[must_use]
     pub fn touches(self, other: Self) -> bool {
         self.pitch == other.pitch
@@ -104,7 +105,7 @@ impl Range {
             && other.start().0 <= self.end().0.saturating_add(1)
     }
 
-    /// The smallest range covering both `self` and `other`.
+    /// Return the smallest range covering both `self` and `other`.
     ///
     /// Only meaningful when [`Range::touches`] holds — merging two unrelated ranges would silently
     /// pull in whatever lies between them.

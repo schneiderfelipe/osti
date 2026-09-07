@@ -8,13 +8,13 @@ impl Pitch {
     /// A4, 440 Hz — the reference pitch tuning is built from.
     pub const A4: Self = Self(69);
 
-    /// The pitch's frequency, in Hz.
+    /// Return the pitch's frequency, in Hz.
     #[must_use]
     pub fn frequency_hz(self) -> f64 {
         440.0 * ((f64::from(self.0) - 69.0) / 12.0).exp2()
     }
 
-    /// The pitch's name, in scientific pitch notation (`"A4"`, `"C#5"`, ...) — MIDI's own
+    /// Return the pitch's name, in scientific pitch notation (`"A4"`, `"C#5"`, ...) — MIDI's own
     /// convention, where middle C (60) is `C4`.
     #[must_use]
     pub fn name(self) -> String {

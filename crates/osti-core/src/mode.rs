@@ -17,9 +17,8 @@ pub enum Mode {
 }
 
 impl Mode {
-    /// The result of pressing a mode's own toggle key: back to `Normal` if already in `target`,
-    /// or into `target` otherwise — how both `v` (`Visual`) and `?` (`Help`) behave, press once
-    /// to enter, again to leave.
+    /// Toggle into `target`: return to `Normal` if already there, switch to `target` otherwise —
+    /// how both `v` (`Visual`) and `?` (`Help`) behave, press once to enter, again to leave.
     #[must_use]
     pub fn toggled(self, target: Self) -> Self {
         if self == target { Self::Normal } else { target }

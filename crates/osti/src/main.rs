@@ -63,7 +63,7 @@ fn run(
     }
 }
 
-/// Where to draw the playhead: the audio thread's own live position while it's actually
+/// Return where to draw the playhead: the audio thread's own live position while it's actually
 /// advancing, or the editor's last-known position otherwise (paused, stopped, or no audio at
 /// all) — the audio thread has no reason to keep publishing a position it isn't moving.
 fn playhead(editor: &Editor, audio: Option<&PlaybackHandle>) -> Tick {

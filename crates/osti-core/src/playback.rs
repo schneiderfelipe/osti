@@ -25,7 +25,7 @@ pub struct Playback {
 }
 
 impl Playback {
-    /// One empty track, not playing.
+    /// Build one empty track, not playing.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -34,7 +34,7 @@ impl Playback {
         }
     }
 
-    /// The track at `id`.
+    /// Return the track at `id`.
     #[must_use]
     pub fn track(&self, id: TrackId) -> &Track {
         &self.tracks[usize::from(id.0)]

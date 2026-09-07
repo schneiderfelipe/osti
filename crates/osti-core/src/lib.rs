@@ -31,7 +31,7 @@ pub(crate) mod test_support {
     use crate::time::Tick;
     use crate::track::Position;
 
-    /// A position at `tick`, `pitch`.
+    /// Build a position at `tick`, `pitch`.
     pub fn at(tick: u16, pitch: u8) -> Position {
         Position {
             tick: Tick(tick),
