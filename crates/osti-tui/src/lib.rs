@@ -8,9 +8,7 @@ use std::ops::Range as TickRange;
 use std::ops::RangeInclusive;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use osti_core::{
-    Action, Editor, Mode, Pitch, PlaybackAction, PlaybackIntent, Range, Tick, TrackId,
-};
+use osti_core::{Action, Editor, Mode, Pitch, PlaybackAction, Position, Range, Tick, TrackId};
 pub use ratatui::DefaultTerminal;
 use ratatui::{
     Frame,
@@ -86,8 +84,11 @@ const NOTE_START: &str = "▐";
 const NOTE_BODY: &str = "█";
 const EMPTY: &str = "·";
 
+/// The track this UI shows and edits — always the first one, until multi-track UI exists.
+const TRACK: TrackId = TrackId(0);
+
 fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'static>> {
-    let track = editor.playback.tracks.first();
+    let track = editor.playback.track(TRACK);
     let low = viewport.pitches.start().0;
     let high = viewport.pitches.end().0;
     (low..=high)
@@ -113,7 +114,7 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
                     if editor
                         .selection
                         .ranges()
-                        .any(|range| covers(range, pitch, tick))
+                        .any(|range| range.covers(Position { tick, pitch }))
                     {
                         modifier |= Modifier::UNDERLINED;
                     }
@@ -133,10 +134,6 @@ fn status_line(editor: &Editor) -> String {
         Mode::Help => "HELP".to_string(),
         Mode::Command => format!(":{}", editor.command_line),
     }
-}
-
-fn covers(range: Range, pitch: Pitch, tick: Tick) -> bool {
-    range.pitch == pitch && (range.start()..=range.end()).contains(&tick)
 }
 
 /// The help overlay's content — computed from the same `Command` tables that drive dispatch, not
@@ -356,8 +353,12 @@ const INSERT: &[Command] = &[
     Command::Leave,
 ];
 
-/// Visual mode's commands: the same as normal mode, but movement extends (see `apply`) — plus
-/// leaving, either way (`v` again, like entering it, or `Esc`).
+/// Visual mode's commands: the same as normal mode, but movement extends (see `apply`) instead of
+/// moving — plus leaving, either way (`v` again, like entering it, or `Esc`). `EnterInsert` and
+/// `OpenCommandLine` work here too, same as normal mode, and the selection carries over into
+/// wherever they lead: entering insert mode with a multi-tick selection still held is how a note
+/// gets placed at that exact length in one pass (select the span, `i`, `Space`), rather than
+/// needing to leave visual mode first.
 const VISUAL: &[Command] = &[
     Command::MoveLeft,
     Command::MoveRight,
@@ -367,6 +368,8 @@ const VISUAL: &[Command] = &[
     Command::NextNote,
     Command::GotoStart,
     Command::GotoEnd,
+    Command::EnterInsert,
+    Command::OpenCommandLine,
     Command::Delete,
     Command::Undo,
     Command::Redo,
@@ -486,12 +489,12 @@ fn apply(command: Command, editor: &Editor, viewport: &Viewport) -> Option<Actio
     // second range entirely, not a change to this one.
     let extend = editor.mode == Mode::Visual;
     match command {
-        Command::MoveLeft => Some(set_tick(editor, extend, |range| {
+        Command::MoveLeft => Some(moved_tick(editor, extend, |range| {
             Tick(range.head.0.saturating_sub(1))
         })),
         Command::MoveRight => {
             let max = viewport.ticks.end.0.saturating_sub(1);
-            Some(set_tick(editor, extend, move |range| {
+            Some(moved_tick(editor, extend, move |range| {
                 Tick((range.head.0 + 1).min(max))
             }))
         }
@@ -508,35 +511,35 @@ fn apply(command: Command, editor: &Editor, viewport: &Viewport) -> Option<Actio
             }))
         }
         Command::PreviousNote => {
-            let track = editor.playback.tracks.first();
-            Some(set_tick(editor, extend, |range| {
+            let track = editor.playback.track(TRACK);
+            Some(moved_tick(editor, extend, |range| {
                 track
                     .previous_note_start(range.pitch, range.head)
                     .unwrap_or(range.head)
             }))
         }
         Command::NextNote => {
-            let track = editor.playback.tracks.first();
-            Some(set_tick(editor, extend, |range| {
+            let track = editor.playback.track(TRACK);
+            Some(moved_tick(editor, extend, |range| {
                 track
                     .next_note_end(range.pitch, range.head)
                     .unwrap_or(range.head)
             }))
         }
-        Command::GotoStart => Some(set_tick(editor, extend, |_| Tick(0))),
+        Command::GotoStart => Some(moved_tick(editor, extend, |_| Tick(0))),
         Command::GotoEnd => {
             let end = viewport.ticks.end.0.saturating_sub(1);
-            Some(set_tick(editor, extend, move |_| Tick(end)))
+            Some(moved_tick(editor, extend, move |_| Tick(end)))
         }
         Command::EnterInsert => Some(Action::SetMode(Mode::Insert)),
-        Command::ToggleVisual => Some(Action::SetMode(toggled_mode(editor.mode, Mode::Visual))),
+        Command::ToggleVisual => Some(Action::SetMode(editor.mode.toggled(Mode::Visual))),
         Command::OpenCommandLine => Some(Action::SetMode(Mode::Command)),
-        Command::ToggleHelp => Some(Action::SetMode(toggled_mode(editor.mode, Mode::Help))),
+        Command::ToggleHelp => Some(Action::SetMode(editor.mode.toggled(Mode::Help))),
         Command::Delete => delete_selection(editor),
         Command::Undo => Some(Action::Undo),
         Command::Redo => Some(Action::Redo),
         Command::PlayPause => {
-            let intent = toggled(editor.playback.transport.intent);
+            let intent = editor.playback.transport.intent.toggled();
             Some(Action::Playback(PlaybackAction::SetPlaybackIntent(intent)))
         }
         Command::SeekHere => {
@@ -548,22 +551,24 @@ fn apply(command: Command, editor: &Editor, viewport: &Viewport) -> Option<Actio
     }
 }
 
-fn set_tick(editor: &Editor, extend: bool, mut new_head: impl FnMut(Range) -> Tick) -> Action {
-    Action::SetSelection(editor.selection.clone().map(|range| {
-        let head = new_head(range);
-        Range {
-            head,
-            anchor: if extend { range.anchor } else { head },
-            pitch: range.pitch,
-        }
-    }))
+/// Move every range's head, per `new_head` — see [`Range::moved`] for what `extend` does to the
+/// anchor.
+fn moved_tick(editor: &Editor, extend: bool, mut new_head: impl FnMut(Range) -> Tick) -> Action {
+    Action::SetSelection(
+        editor
+            .selection
+            .clone()
+            .map(|range| range.moved(new_head(range), extend)),
+    )
 }
 
 fn moved_pitch(editor: &Editor, mut new_pitch: impl FnMut(Range) -> Pitch) -> Action {
-    Action::SetSelection(editor.selection.clone().map(|range| Range {
-        pitch: new_pitch(range),
-        ..range
-    }))
+    Action::SetSelection(
+        editor
+            .selection
+            .clone()
+            .map(|range| range.with_pitch(new_pitch(range))),
+    )
 }
 
 /// Insert a note at every cursor, sized to that cursor's own span (see `Range::length`) — a
@@ -573,7 +578,7 @@ fn place_note(editor: &Editor) -> Action {
         .selection
         .ranges()
         .map(|range| PlaybackAction::InsertNote {
-            track: TrackId(0),
+            track: TRACK,
             at: range.position(),
             length: range.length(),
         });
@@ -583,15 +588,12 @@ fn place_note(editor: &Editor) -> Action {
 
 /// Delete every note whose start falls within any range's span — `None` if there's nothing there.
 fn delete_selection(editor: &Editor) -> Option<Action> {
-    let track = editor.playback.tracks.first();
+    let track = editor.playback.track(TRACK);
     let removals = editor
         .selection
         .ranges()
         .flat_map(|range| track.positions_in_span(range.pitch, range.start(), range.end()))
-        .map(|at| PlaybackAction::RemoveNote {
-            track: TrackId(0),
-            at,
-        });
+        .map(|at| PlaybackAction::RemoveNote { track: TRACK, at });
     PlaybackAction::batch(removals).map(Action::Playback)
 }
 
@@ -603,18 +605,18 @@ fn resolve_command(pending: &[KeyEvent], editor: &Editor) -> Resolution {
     match key.code {
         KeyCode::Esc => Resolution::Action(Action::SetMode(Mode::Normal)),
         KeyCode::Enter => Resolution::Action(command(&editor.command_line)),
-        KeyCode::Backspace => {
-            let mut text = editor.command_line.clone();
+        KeyCode::Backspace => edited_command_line(editor, |text| {
             text.pop();
-            Resolution::Action(Action::SetCommandLine(text))
-        }
-        KeyCode::Char(c) => {
-            let mut text = editor.command_line.clone();
-            text.push(c);
-            Resolution::Action(Action::SetCommandLine(text))
-        }
+        }),
+        KeyCode::Char(c) => edited_command_line(editor, |text| text.push(c)),
         _ => Resolution::Cancelled,
     }
+}
+
+fn edited_command_line(editor: &Editor, edit: impl FnOnce(&mut String)) -> Resolution {
+    let mut text = editor.command_line.clone();
+    edit(&mut text);
+    Resolution::Action(Action::SetCommandLine(text))
 }
 
 /// The only commands so far are the ones needed to exit — this is also the *only* way to quit;
@@ -628,21 +630,6 @@ fn command(text: &str) -> Action {
         Action::Quit
     } else {
         Action::SetMode(Mode::Normal)
-    }
-}
-
-const fn toggled(intent: PlaybackIntent) -> PlaybackIntent {
-    match intent {
-        PlaybackIntent::Playing => PlaybackIntent::Paused,
-        PlaybackIntent::Paused => PlaybackIntent::Playing,
-    }
-}
-
-fn toggled_mode(current: Mode, other: Mode) -> Mode {
-    if current == other {
-        Mode::Normal
-    } else {
-        other
     }
 }
 
@@ -758,6 +745,33 @@ mod tests {
         let range = editor.selection.primary();
         assert_eq!(range.anchor, Tick(0)); // unchanged
         assert_eq!(range.head, Tick(1)); // moved
+    }
+
+    #[test]
+    fn selecting_a_span_in_visual_mode_then_inserting_places_a_note_that_length() {
+        // The direct Helix-style workflow: select a span, `i` straight from visual mode (no need
+        // to leave it first), `Space` places one note the whole span long.
+        let mut editor = Editor::new();
+        editor.update(Action::SetMode(Mode::Visual));
+        let mut keymap = Keymap::default();
+
+        let extend = feed(&mut keymap, &editor, KeyCode::Char('l')).unwrap();
+        editor.update(extend);
+        let enter_insert = feed(&mut keymap, &editor, KeyCode::Char('i')).unwrap();
+        editor.update(enter_insert);
+        let place = feed(&mut keymap, &editor, KeyCode::Char(' ')).unwrap();
+
+        assert_eq!(
+            place,
+            Action::Playback(PlaybackAction::InsertNote {
+                track: TrackId(0),
+                at: osti_core::Position {
+                    tick: Tick(0),
+                    pitch: Pitch::A4,
+                },
+                length: osti_core::Length(2),
+            })
+        );
     }
 
     #[test]

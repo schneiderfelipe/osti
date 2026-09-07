@@ -63,6 +63,36 @@ impl Range {
         }
     }
 
+    /// Whether this range covers `position` — same pitch, and within `[start, end]`.
+    #[must_use]
+    pub fn covers(self, position: Position) -> bool {
+        self.pitch == position.pitch && (self.start()..=self.end()).contains(&position.tick)
+    }
+
+    /// Move `head` to a new tick. `extend` decides what happens to `anchor`: left alone (Helix's
+    /// Visual-mode movement, growing the selection) or collapsed to match the new head (an
+    /// ordinary move, in every other mode).
+    #[must_use]
+    pub const fn moved(self, head: Tick, extend: bool) -> Self {
+        Self {
+            pitch: self.pitch,
+            anchor: if extend { self.anchor } else { head },
+            head,
+        }
+    }
+
+    /// Move to a different pitch row, keeping the same tick span. Never extends either way — a
+    /// range can only ever occupy one row (see the type's own docs), so there's no second range
+    /// for pitch movement to grow into.
+    #[must_use]
+    pub const fn with_pitch(self, pitch: Pitch) -> Self {
+        Self {
+            pitch,
+            anchor: self.anchor,
+            head: self.head,
+        }
+    }
+
     /// Whether `self` and `other` overlap or touch on the same pitch (mergeable into one range).
     #[must_use]
     pub fn touches(self, other: Self) -> bool {
@@ -148,6 +178,49 @@ mod tests {
             head: Tick(5),
         };
         assert!(!low.touches(high));
+    }
+
+    #[test]
+    fn moving_without_extending_collapses_the_anchor_to_the_new_head() {
+        let range = Range {
+            pitch: Pitch(60),
+            anchor: Tick(2),
+            head: Tick(2),
+        };
+        let moved = range.moved(Tick(5), false);
+        assert_eq!((moved.anchor, moved.head), (Tick(5), Tick(5)));
+    }
+
+    #[test]
+    fn moving_while_extending_keeps_the_anchor_in_place() {
+        let range = Range {
+            pitch: Pitch(60),
+            anchor: Tick(2),
+            head: Tick(2),
+        };
+        let moved = range.moved(Tick(5), true);
+        assert_eq!((moved.anchor, moved.head), (Tick(2), Tick(5)));
+    }
+
+    #[test]
+    fn covers_checks_pitch_and_span_together() {
+        let range = Range {
+            pitch: Pitch(60),
+            anchor: Tick(2),
+            head: Tick(4),
+        };
+        assert!(range.covers(Position {
+            tick: Tick(3),
+            pitch: Pitch(60)
+        }));
+        assert!(!range.covers(Position {
+            tick: Tick(5),
+            pitch: Pitch(60)
+        })); // outside the span
+        assert!(!range.covers(Position {
+            tick: Tick(3),
+            pitch: Pitch(61)
+        })); // right tick, wrong pitch
     }
 
     #[test]

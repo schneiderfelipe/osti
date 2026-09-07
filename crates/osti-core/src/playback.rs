@@ -34,6 +34,12 @@ impl Playback {
         }
     }
 
+    /// The track at `id`.
+    #[must_use]
+    pub fn track(&self, id: TrackId) -> &Track {
+        &self.tracks[usize::from(id.0)]
+    }
+
     fn track_mut(&mut self, track: TrackId) -> &mut Track {
         &mut self.tracks[usize::from(track.0)]
     }

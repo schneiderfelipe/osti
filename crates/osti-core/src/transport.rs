@@ -16,6 +16,17 @@ pub enum PlaybackIntent {
     Playing,
 }
 
+impl PlaybackIntent {
+    /// The other state — play/pause always means "switch to whichever I'm not."
+    #[must_use]
+    pub const fn toggled(self) -> Self {
+        match self {
+            Self::Playing => Self::Paused,
+            Self::Paused => Self::Playing,
+        }
+    }
+}
+
 /// The transport's state: whether it's running, and where.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Transport {
@@ -23,4 +34,15 @@ pub struct Transport {
     pub intent: PlaybackIntent,
     /// The current (or, while paused, the resume) position.
     pub position: Tick,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toggling_flips_between_playing_and_paused() {
+        assert_eq!(PlaybackIntent::Paused.toggled(), PlaybackIntent::Playing);
+        assert_eq!(PlaybackIntent::Playing.toggled(), PlaybackIntent::Paused);
+    }
 }
