@@ -8,7 +8,9 @@ use std::ops::Range as TickRange;
 use std::ops::RangeInclusive;
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use osti_core::{Action, Editor, Mode, Pitch, PlaybackAction, Position, Range, Tick, TrackId};
+use osti_core::{
+    Action, Editor, Mode, Note, Pitch, PlaybackAction, Position, Range, Tick, TrackId,
+};
 pub use ratatui::DefaultTerminal;
 use ratatui::{
     Frame,
@@ -162,73 +164,81 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
     let track = editor.playback.track(TRACK);
     let low = viewport.pitches.start().0;
     let high = viewport.pitches.end().0;
+
+    // One bounded query per visible tick, not one per (pitch, tick) cell below — every row reuses
+    // this instead of re-querying the same tick's chord once per pitch it happens to draw.
+    let chords: Vec<Vec<Note>> = (viewport.ticks.start.0..viewport.ticks.end.0)
+        .map(|raw_tick| track.sounding_at(Tick(raw_tick)).collect())
+        .collect();
+    let playing_chord: Vec<Note> = track.sounding_at(playhead).collect();
+
     (low..=high)
         .rev()
         .map(|raw_pitch| {
             let pitch = Pitch(raw_pitch);
             // At most one note per pitch can be sounding at any given tick (see `Track::insert`'s
             // own docs), so there's at most one note here to highlight as "currently playing".
-            let playing = track
-                .sounding_at(playhead)
-                .find(|note| note.position.pitch == pitch);
-            let cells = (viewport.ticks.start.0..viewport.ticks.end.0).map(|raw_tick| {
-                let tick = Tick(raw_tick);
-                let sounding = track
-                    .sounding_at(tick)
-                    .find(|note| note.position.pitch == pitch);
-                let symbol = match sounding {
-                    Some(note) if note.position.tick == tick => NOTE_START,
-                    Some(_) => NOTE_BODY,
-                    None => EMPTY,
-                };
+            let playing = playing_chord
+                .iter()
+                .find(|note| note.position.pitch == pitch)
+                .copied();
+            let cells = chords
+                .iter()
+                .zip(viewport.ticks.start.0..viewport.ticks.end.0)
+                .map(|(chord, raw_tick)| {
+                    let tick = Tick(raw_tick);
+                    let sounding = chord
+                        .iter()
+                        .find(|note| note.position.pitch == pitch)
+                        .copied();
+                    let symbol = match sounding {
+                        Some(note) if note.position.tick == tick => NOTE_START,
+                        Some(_) => NOTE_BODY,
+                        None => EMPTY,
+                    };
 
-                let mut style = Style::default();
-                if playing.is_some_and(|note| note.covers(tick)) {
-                    style = style.fg(PLAYING_COLOR).add_modifier(Modifier::BOLD);
-                }
-                if tick == playhead {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-                if editor
-                    .selection
-                    .ranges()
-                    .any(|range| range.covers(Position { tick, pitch }))
-                {
-                    style = style.add_modifier(Modifier::UNDERLINED);
-                }
-                Span::styled(symbol, style)
-            });
+                    let mut style = Style::default();
+                    if playing.is_some_and(|note| note.covers(tick)) {
+                        style = style.fg(PLAYING_COLOR).add_modifier(Modifier::BOLD);
+                    }
+                    if tick == playhead {
+                        style = style.add_modifier(Modifier::REVERSED);
+                    }
+                    if editor
+                        .selection
+                        .ranges()
+                        .any(|range| range.covers(Position { tick, pitch }))
+                    {
+                        style = style.add_modifier(Modifier::UNDERLINED);
+                    }
+                    Span::styled(symbol, style)
+                });
             row(&pitch.name(), cells)
         })
         .collect()
 }
 
-/// The mode's own accent color, shown as the status line's badge background — the same idea as
-/// Helix's own colored mode indicator (not the same literal palette, which there depends on the
-/// active theme): one glance at the color says which mode you're in.
-const fn mode_color(mode: Mode) -> Color {
+/// The status line's badge for a mode: its label, and its own accent color as the badge's
+/// background — the same idea as Helix's own colored mode indicator (not the same literal
+/// palette, which there depends on the active theme): one glance at the color says which mode
+/// you're in.
+const fn mode_badge(mode: Mode) -> (&'static str, Color) {
     match mode {
-        Mode::Normal => Color::Blue,
-        Mode::Insert => Color::Green,
-        Mode::Visual => Color::Yellow,
-        Mode::Command => Color::Cyan,
-        Mode::Help => Color::Magenta,
+        Mode::Normal => ("NORMAL", Color::Blue),
+        Mode::Insert => ("INSERT", Color::Green),
+        Mode::Visual => ("VISUAL", Color::Yellow),
+        Mode::Command => ("COMMAND", Color::Cyan),
+        Mode::Help => ("HELP", Color::Magenta),
     }
 }
 
 fn status_line(editor: &Editor) -> Line<'static> {
-    let label = match editor.mode {
-        Mode::Normal => "NORMAL",
-        Mode::Insert => "INSERT",
-        Mode::Visual => "VISUAL",
-        Mode::Command => "COMMAND",
-        Mode::Help => "HELP",
-    };
+    let (label, color) = mode_badge(editor.mode);
     let badge = Span::styled(
         format!(" {label} "),
         Style::default()
             .fg(Color::Black)
-            .bg(mode_color(editor.mode))
+            .bg(color)
             .add_modifier(Modifier::BOLD),
     );
     if editor.mode == Mode::Command {

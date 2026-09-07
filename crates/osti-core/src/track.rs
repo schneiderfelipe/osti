@@ -48,6 +48,15 @@ impl Note {
     }
 }
 
+impl From<(&Position, &Length)> for Note {
+    /// Pairs a [`Track`]'s `BTreeMap` entries directly (`(&Position, &Length)`, exactly what its
+    /// iterators yield), so every query below can build a `Note` with `.map(Note::from)` instead
+    /// of repeating the same field-by-field construction.
+    fn from((&position, &length): (&Position, &Length)) -> Self {
+        Self { position, length }
+    }
+}
+
 /// A sorted map from where each note starts to how long it lasts.
 ///
 /// The value only carries data about the note *other* than its pitch (currently just how long it
@@ -74,7 +83,7 @@ impl Track {
         let window = window(tick, tick);
         self.notes
             .range(window)
-            .map(|(&position, &length)| Note { position, length })
+            .map(Note::from)
             .filter(move |note| note.covers(tick))
     }
 
@@ -87,7 +96,7 @@ impl Track {
         self.notes
             .iter()
             .filter(move |(position, _)| position.pitch == pitch)
-            .map(|(&position, &length)| Note { position, length })
+            .map(Note::from)
     }
 
     /// The start of the nearest note at `pitch` starting before `tick`, if any.
@@ -138,7 +147,7 @@ impl Track {
         let window = window(at, Tick(end.saturating_sub(1)));
         self.notes
             .range(window)
-            .map(|(&position, &length)| Note { position, length })
+            .map(Note::from)
             .filter(|note| {
                 note.position.pitch == pitch && note.position.tick.0 < end && at.0 <= note.end().0
             })

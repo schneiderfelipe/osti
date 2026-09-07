@@ -46,14 +46,23 @@ impl Editor {
     /// anything else it's simply `action` handed back. Forward it to the audio thread's own
     /// `Playback` whenever it's `Action::Playback(_)`. `None` only for `Undo`/`Redo` with nothing
     /// to replay (an empty stack) — nothing to forward then either.
+    ///
+    /// # Panics
+    ///
+    /// If `action` is `Action::Quit` — ending the session isn't a state mutation this method
+    /// could perform; the runtime is expected to intercept `Quit` and stop before ever calling
+    /// `update` with it (see `osti`'s own `run` loop).
     pub fn update(&mut self, action: Action) -> Option<Action> {
         let resolved = self.history.resolve(action)?;
 
         let inverse = match &resolved.action {
-            Action::Quit | Action::Undo | Action::Redo => {
-                unreachable!(
-                    "`History::resolve` only ever hands back a concrete, data-mutating action"
-                )
+            // Unlike `Quit`, `Undo`/`Redo` themselves are never in `resolved.action` — `resolve`
+            // above already replaced them with the concrete, data-mutating action they replay.
+            Action::Undo | Action::Redo => {
+                unreachable!("`History::resolve` replaces these with the action they replay")
+            }
+            Action::Quit => {
+                unreachable!("the runtime must intercept `Quit` before calling `update`")
             }
             Action::SetSelection(new) => {
                 self.selection = new.clone().normalized();
@@ -161,6 +170,14 @@ mod tests {
 
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.command_line, "");
+    }
+
+    #[test]
+    #[should_panic(expected = "the runtime must intercept")]
+    fn quit_must_never_reach_update() {
+        // Documents, and enforces, the contract `update`'s own docs state: a caller — today,
+        // only `osti`'s run loop — must handle `Action::Quit` itself before it ever gets here.
+        Editor::new().update(Action::Quit);
     }
 
     #[test]

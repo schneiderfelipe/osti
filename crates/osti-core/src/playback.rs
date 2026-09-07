@@ -103,35 +103,26 @@ impl Playback {
     /// "pressed play" doesn't rewind anything), or it was undoable in principle but had nothing
     /// to undo (removing a note that wasn't there).
     ///
-    /// # Panics
-    ///
-    /// Never, in practice — the one internal `unwrap` only fails on an empty `Vec`, and it's only
-    /// reached right after pushing at least one element onto it.
     pub fn apply(&mut self, action: &PlaybackAction) -> Option<PlaybackAction> {
         match action {
             PlaybackAction::InsertNote { track, at, length } => {
                 let removed = self.track_mut(*track).insert(*at, *length);
-                let undo_insert = PlaybackAction::RemoveNote {
+                let mut inverses: Vec<PlaybackAction> = removed
+                    .into_iter()
+                    .map(|note| PlaybackAction::InsertNote {
+                        track: *track,
+                        at: note.position,
+                        length: note.length,
+                    })
+                    .collect();
+                inverses.push(PlaybackAction::RemoveNote {
                     track: *track,
                     at: *at,
-                };
-                if removed.is_empty() {
-                    Some(undo_insert)
-                } else {
-                    let mut inverses: Vec<PlaybackAction> = removed
-                        .into_iter()
-                        .map(|note| PlaybackAction::InsertNote {
-                            track: *track,
-                            at: note.position,
-                            length: note.length,
-                        })
-                        .collect();
-                    inverses.push(undo_insert);
-                    #[allow(clippy::unwrap_used)] // just pushed at least one element above
-                    Some(PlaybackAction::Batch(Box::new(
-                        NonEmpty::from_vec(inverses).unwrap(),
-                    )))
-                }
+                });
+                // Always `Some`: `inverses` always has at least the `RemoveNote` just pushed —
+                // same collapsing `PlaybackAction::batch` gives every other multi-action caller,
+                // rather than reimplementing it here by hand.
+                PlaybackAction::batch(inverses)
             }
             PlaybackAction::RemoveNote { track, at } => {
                 self.track_mut(*track)
