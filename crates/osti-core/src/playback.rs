@@ -75,11 +75,17 @@ pub enum PlaybackAction {
 impl PlaybackAction {
     /// Combine several actions into one atomic batch — how a multi-cursor edit is built, one
     /// action per range in the selection. `None` for an empty input: there's nothing to batch,
-    /// and an empty batch isn't a representable state to begin with.
+    /// and an empty batch isn't a representable state to begin with. A single action is handed
+    /// back unwrapped rather than boxed in a one-element batch — the overwhelmingly common case
+    /// (one cursor) shouldn't pay for generality it isn't using.
     #[must_use]
     pub fn batch(actions: impl IntoIterator<Item = Self>) -> Option<Self> {
-        NonEmpty::from_vec(actions.into_iter().collect())
-            .map(|actions| Self::Batch(Box::new(actions)))
+        let actions = NonEmpty::from_vec(actions.into_iter().collect())?;
+        if actions.tail.is_empty() {
+            Some(actions.head)
+        } else {
+            Some(Self::Batch(Box::new(actions)))
+        }
     }
 }
 

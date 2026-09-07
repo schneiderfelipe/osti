@@ -8,8 +8,10 @@ pub enum Mode {
     Normal,
     /// Inserting a note.
     Insert,
+    /// Movement extends the selection instead of moving it (Helix's select mode).
+    Visual,
     /// Typing a command on the `:` command line.
     Command,
-    /// Showing the keybinding help panel.
+    /// Showing the keybinding help overlay.
     Help,
 }

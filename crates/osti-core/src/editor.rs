@@ -47,39 +47,14 @@ impl Editor {
     /// `Playback` whenever it's `Action::Playback(_)`. `None` only for `Undo`/`Redo` with nothing
     /// to replay (an empty stack) — nothing to forward then either.
     pub fn update(&mut self, action: Action) -> Option<Action> {
-        match &action {
-            Action::Quit => {
-                unreachable!("Quit is intercepted by the runtime before reaching Editor::update")
-            }
-            Action::Undo => {
-                let inverse = self.history.pop_undo()?;
-                if let Some(redo) = self.mutate(&inverse) {
-                    self.history.push_redo(redo);
-                }
-                Some(inverse)
-            }
-            Action::Redo => {
-                let redone = self.history.pop_redo()?;
-                if let Some(undo) = self.mutate(&redone) {
-                    self.history.push_undo(undo);
-                }
-                Some(redone)
-            }
-            _ => {
-                if let Some(inverse) = self.mutate(&action) {
-                    self.history.record(inverse);
-                }
-                Some(action)
-            }
-        }
-    }
+        let resolved = self.history.resolve(action)?;
 
-    /// The pure primitive step: applies one non-undo/redo action and reports its inverse, with no
-    /// history bookkeeping of its own. Shared by `update`'s three cases (a fresh action, and
-    /// replaying an inverse for `Undo` or `Redo`) so the actual mutation logic exists once, not
-    /// three times — `update` is still the only *public* entry point.
-    fn mutate(&mut self, action: &Action) -> Option<Action> {
-        match action {
+        let inverse = match &resolved.action {
+            Action::Quit | Action::Undo | Action::Redo => {
+                unreachable!(
+                    "`History::resolve` only ever hands back a concrete, data-mutating action"
+                )
+            }
             Action::SetSelection(new) => {
                 self.selection = new.clone().normalized();
                 // Moving the selection isn't undoable — matching how editors generally treat
@@ -100,10 +75,10 @@ impl Editor {
             Action::Playback(playback_action) => {
                 self.playback.apply(playback_action).map(Action::Playback)
             }
-            Action::Quit | Action::Undo | Action::Redo => {
-                unreachable!("intercepted by `update` before reaching `mutate`")
-            }
-        }
+        };
+
+        self.history.settle(&resolved, inverse);
+        Some(resolved.action)
     }
 }
 
@@ -117,7 +92,6 @@ impl Default for Editor {
 mod tests {
     use super::*;
     use crate::playback::{PlaybackAction, TrackId};
-    use crate::track::Position;
 
     fn insert_a4_at(tick: u16) -> Action {
         Action::Playback(PlaybackAction::InsertNote {
@@ -187,5 +161,19 @@ mod tests {
 
         assert_eq!(editor.mode, Mode::Normal);
         assert_eq!(editor.command_line, "");
+    }
+
+    #[test]
+    fn moving_the_selection_is_not_undoable() {
+        let mut editor = Editor::new();
+        let moved = Selection::single(Range::at(Position {
+            tick: Tick(1),
+            pitch: Pitch::A4,
+        }));
+
+        editor.update(Action::SetSelection(moved));
+        editor.update(Action::Undo); // nothing to undo — the move wasn't recorded
+
+        assert_eq!(editor.selection.primary().anchor, Tick(1));
     }
 }

@@ -44,6 +44,62 @@ impl Track {
             .map(|(&position, &length)| (position, length))
     }
 
+    /// Every note at `pitch`, in tick order — the one row a selection ever moves along, so this
+    /// is what note-boundary movement (jumping to the previous/next note, like Helix's word
+    /// motions) and span-based edits (deleting everything a multi-tick selection covers) both
+    /// build on.
+    pub fn notes_at_pitch(&self, pitch: Pitch) -> impl Iterator<Item = (Position, Length)> + '_ {
+        // The map is sorted tick-first, so filtering to one pitch still yields ascending ticks.
+        self.notes
+            .iter()
+            .filter(move |(position, _)| position.pitch == pitch)
+            .map(|(&position, &length)| (position, length))
+    }
+
+    /// The start of the nearest note at `pitch` starting before `tick`, if any.
+    ///
+    /// Helix's `b` (jump to the previous word start), for notes: already sitting on or inside a
+    /// note jumps to *that* note's start first (its start is still `< tick` unless `tick` is
+    /// exactly it), pressing it again from there reaches the one before.
+    #[must_use]
+    pub fn previous_note_start(&self, pitch: Pitch, tick: Tick) -> Option<Tick> {
+        self.notes_at_pitch(pitch)
+            .map(|(position, _)| position.tick)
+            .filter(|&start| start < tick)
+            .max()
+    }
+
+    /// The end (last covered tick) of the nearest note at `pitch` ending after `tick`, if any —
+    /// Helix's `e`, symmetric to [`Track::previous_note_start`].
+    #[must_use]
+    pub fn next_note_end(&self, pitch: Pitch, tick: Tick) -> Option<Tick> {
+        self.notes_at_pitch(pitch)
+            .filter_map(|(position, length)| {
+                let end = position
+                    .tick
+                    .0
+                    .saturating_add(u16::from(length.0))
+                    .saturating_sub(1);
+                (end > tick.0).then_some(Tick(end))
+            })
+            .min()
+    }
+
+    /// Every note at `pitch` starting within `[start, end]` (inclusive) — everything a (possibly
+    /// multi-tick) selection covers, for deleting more than one note at once. Notes merely
+    /// overlapping into the span from before `start` are left alone; only where a note *starts*
+    /// counts as being in the selection.
+    pub fn positions_in_span(
+        &self,
+        pitch: Pitch,
+        start: Tick,
+        end: Tick,
+    ) -> impl Iterator<Item = Position> + '_ {
+        self.notes_at_pitch(pitch)
+            .map(|(position, _)| position)
+            .filter(move |position| start <= position.tick && position.tick <= end)
+    }
+
     /// Every note at `pitch` overlapping `[at, at + length)`.
     fn overlapping(&self, pitch: Pitch, at: Tick, length: Length) -> Vec<(Position, Length)> {
         let end = at.0.saturating_add(u16::from(length.0));
@@ -160,5 +216,55 @@ mod tests {
 
         assert_eq!(removed, vec![(at(5, 60), Length(2))]);
         assert_eq!(track.sounding_at(Tick(5)).count(), 1); // only the new, longer note remains
+    }
+
+    #[test]
+    fn previous_note_start_finds_the_current_note_before_an_earlier_one() {
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(2));
+        track.insert(at(5, 60), Length(2));
+
+        // Standing inside the note at 5: its own start comes first, not the one at 0.
+        assert_eq!(track.previous_note_start(Pitch(60), Tick(6)), Some(Tick(5)));
+        // Standing exactly on a note's start: the previous *other* note, not itself.
+        assert_eq!(track.previous_note_start(Pitch(60), Tick(5)), Some(Tick(0)));
+        // Nothing before the first note.
+        assert_eq!(track.previous_note_start(Pitch(60), Tick(0)), None);
+    }
+
+    #[test]
+    fn next_note_end_finds_the_current_note_before_a_later_one() {
+        let mut track = Track::new();
+        track.insert(at(0, 60), Length(2)); // covers 0..2, ends at 1
+        track.insert(at(5, 60), Length(2)); // covers 5..7, ends at 6
+
+        // Standing inside the first note: its own end comes first.
+        assert_eq!(track.next_note_end(Pitch(60), Tick(0)), Some(Tick(1)));
+        // Standing exactly on that end: the next note's end, not the same one again.
+        assert_eq!(track.next_note_end(Pitch(60), Tick(1)), Some(Tick(6)));
+        // Nothing after the last note.
+        assert_eq!(track.next_note_end(Pitch(60), Tick(6)), None);
+    }
+
+    #[test]
+    fn note_boundary_motions_ignore_other_pitches() {
+        let mut track = Track::new();
+        track.insert(at(3, 61), Length(1));
+        assert_eq!(track.previous_note_start(Pitch(60), Tick(10)), None);
+        assert_eq!(track.next_note_end(Pitch(60), Tick(0)), None);
+    }
+
+    #[test]
+    fn positions_in_span_finds_notes_starting_within_it_only() {
+        let mut track = Track::new();
+        track.insert(at(2, 60), Length(1));
+        track.insert(at(4, 60), Length(1));
+        track.insert(at(8, 60), Length(1));
+
+        let found: Vec<_> = track
+            .positions_in_span(Pitch(60), Tick(2), Tick(4))
+            .collect();
+
+        assert_eq!(found, vec![at(2, 60), at(4, 60)]);
     }
 }
