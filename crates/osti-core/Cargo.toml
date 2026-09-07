@@ -1,6 +1,6 @@
 [package]
 name = "osti-core"
-description = "Domain model for osti: patterns, notes, selection, and the action/undo core"
+description = "Domain model for osti: tracks, notes, selection, and the action/undo core"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

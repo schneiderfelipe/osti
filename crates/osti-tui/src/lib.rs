@@ -308,16 +308,17 @@ fn keys_label(command: Command) -> String {
 }
 
 fn key_label(code: KeyCode) -> String {
-    match code {
-        KeyCode::Char(' ') => "Space".to_string(),
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::Left => "←".to_string(),
-        KeyCode::Right => "→".to_string(),
-        KeyCode::Up => "↑".to_string(),
-        KeyCode::Down => "↓".to_string(),
-        KeyCode::Esc => "Esc".to_string(),
-        other => format!("{other:?}"),
-    }
+    let label = match code {
+        KeyCode::Char(' ') => "Space",
+        KeyCode::Char(c) => return c.to_string(),
+        KeyCode::Left => "←",
+        KeyCode::Right => "→",
+        KeyCode::Up => "↑",
+        KeyCode::Down => "↓",
+        KeyCode::Esc => "Esc",
+        other => return format!("{other:?}"),
+    };
+    label.to_string()
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -924,6 +925,69 @@ mod tests {
     }
 
     #[test]
+    fn b_and_e_jump_between_note_boundaries() {
+        let mut editor = Editor::new();
+        editor.update(Action::Playback(PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: osti_core::Position {
+                tick: Tick(5),
+                pitch: Pitch::A4,
+            },
+            length: osti_core::Length(3), // covers ticks 5..7
+        }));
+        let mut keymap = Keymap::default();
+
+        let jump_end = feed(&mut keymap, &editor, KeyCode::Char('e')).unwrap();
+        editor.update(jump_end);
+        assert_eq!(editor.selection.primary().head, Tick(7)); // the note's own end
+
+        let jump_start = feed(&mut keymap, &editor, KeyCode::Char('b')).unwrap();
+        editor.update(jump_start);
+        assert_eq!(editor.selection.primary().head, Tick(5)); // the note's own start
+    }
+
+    #[test]
+    fn u_and_shift_u_map_to_undo_and_redo() {
+        let editor = Editor::new();
+        let mut keymap = Keymap::default();
+
+        assert_eq!(
+            feed(&mut keymap, &editor, KeyCode::Char('u')),
+            Some(Action::Undo)
+        );
+        assert_eq!(
+            feed(&mut keymap, &editor, KeyCode::Char('U')),
+            Some(Action::Redo)
+        );
+    }
+
+    #[test]
+    fn j_and_k_move_the_cursor_between_pitch_rows() {
+        let mut editor = Editor::new();
+        let mut keymap = Keymap::default();
+
+        let down = feed(&mut keymap, &editor, KeyCode::Char('j')).unwrap();
+        editor.update(down);
+        assert_eq!(editor.selection.primary().pitch, Pitch(Pitch::A4.0 - 1));
+
+        let up = feed(&mut keymap, &editor, KeyCode::Char('k')).unwrap();
+        editor.update(up);
+        assert_eq!(editor.selection.primary().pitch, Pitch::A4);
+    }
+
+    #[test]
+    fn g_then_e_goes_to_the_end_of_the_viewport() {
+        let mut editor = Editor::new();
+        let mut keymap = Keymap::default();
+
+        assert!(feed(&mut keymap, &editor, KeyCode::Char('g')).is_none());
+        let action = feed(&mut keymap, &editor, KeyCode::Char('e')).unwrap();
+        editor.update(action);
+
+        assert_eq!(editor.selection.primary().head, Tick(10)); // viewport.ticks.end - 1
+    }
+
+    #[test]
     fn visual_mode_extends_instead_of_moving() {
         let mut editor = Editor::new();
         editor.update(Action::SetMode(Mode::Visual));
@@ -961,6 +1025,33 @@ mod tests {
                 },
                 length: osti_core::Length(2),
             })
+        );
+    }
+
+    #[test]
+    fn escape_returns_to_normal_mode() {
+        let mut editor = Editor::new();
+        editor.update(Action::SetMode(Mode::Insert));
+        let mut keymap = Keymap::default();
+
+        let action = feed(&mut keymap, &editor, KeyCode::Esc).unwrap();
+        editor.update(action);
+
+        assert_eq!(editor.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn space_toggles_play_pause_in_normal_mode() {
+        let editor = Editor::new(); // starts paused
+        let mut keymap = Keymap::default();
+
+        let action = feed(&mut keymap, &editor, KeyCode::Char(' ')).unwrap();
+
+        assert_eq!(
+            action,
+            Action::Playback(PlaybackAction::SetPlaybackIntent(
+                osti_core::PlaybackIntent::Playing
+            ))
         );
     }
 
@@ -1005,6 +1096,59 @@ mod tests {
         let editor = Editor::new();
         let mut keymap = Keymap::default();
         assert!(feed(&mut keymap, &editor, KeyCode::Char('d')).is_none());
+    }
+
+    #[test]
+    fn d_deletes_the_note_at_the_cursor() {
+        let mut editor = Editor::new();
+        editor.update(Action::Playback(PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: osti_core::Position {
+                tick: Tick(0),
+                pitch: Pitch::A4,
+            },
+            length: osti_core::Length(2),
+        }));
+        let mut keymap = Keymap::default();
+
+        let action = feed(&mut keymap, &editor, KeyCode::Char('d')).unwrap();
+        editor.update(action);
+
+        assert_eq!(
+            editor.playback.tracks.first().sounding_at(Tick(0)).count(),
+            0
+        );
+    }
+
+    #[test]
+    fn visual_mode_delete_removes_every_note_the_selection_spans() {
+        let mut editor = Editor::new();
+        for tick in [0, 1] {
+            editor.update(Action::Playback(PlaybackAction::InsertNote {
+                track: TrackId(0),
+                at: osti_core::Position {
+                    tick: Tick(tick),
+                    pitch: Pitch::A4,
+                },
+                length: osti_core::Length(1),
+            }));
+        }
+        editor.update(Action::SetMode(Mode::Visual));
+        let mut keymap = Keymap::default();
+
+        let extend = feed(&mut keymap, &editor, KeyCode::Char('l')).unwrap(); // cover both notes
+        editor.update(extend);
+        let delete = feed(&mut keymap, &editor, KeyCode::Char('d')).unwrap();
+        editor.update(delete);
+
+        assert_eq!(
+            editor.playback.tracks.first().sounding_at(Tick(0)).count(),
+            0
+        );
+        assert_eq!(
+            editor.playback.tracks.first().sounding_at(Tick(1)).count(),
+            0
+        );
     }
 
     #[test]

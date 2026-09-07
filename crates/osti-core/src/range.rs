@@ -217,6 +217,18 @@ mod tests {
     }
 
     #[test]
+    fn with_pitch_changes_row_but_keeps_the_tick_span() {
+        let range = Range {
+            pitch: Pitch(60),
+            anchor: Tick(2),
+            head: Tick(5),
+        };
+        let moved = range.with_pitch(Pitch(64));
+        assert_eq!(moved.pitch, Pitch(64));
+        assert_eq!((moved.anchor, moved.head), (Tick(2), Tick(5)));
+    }
+
+    #[test]
     fn covers_checks_pitch_and_span_together() {
         let range = Range {
             pitch: Pitch(60),
