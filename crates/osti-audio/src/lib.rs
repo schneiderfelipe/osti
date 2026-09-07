@@ -182,10 +182,6 @@ impl Player {
     }
 }
 
-fn handle_stream_error(err: &cpal::Error) {
-    eprintln!("audio stream error: {err}");
-}
-
 fn build_and_play<T: SizedSample + FromSample<f64>>(
     device: &cpal::Device,
     config: cpal::StreamConfig,
@@ -199,7 +195,7 @@ fn build_and_play<T: SizedSample + FromSample<f64>>(
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _| player.fill(data, channels),
-        |err| handle_stream_error(&err),
+        |err| eprintln!("audio stream error: {err}"),
         None,
     )?;
     stream.play()?;
