@@ -7,7 +7,7 @@ use color_eyre::Result;
 
 use osti_audio::PlaybackHandle;
 use osti_core::{Action, Editor, PlaybackIntent, Tick};
-use osti_tui::{DefaultTerminal, Keymap};
+use osti_tui::{DefaultTerminal, Keymap, Viewport};
 
 /// How often the UI redraws on its own, to reflect the transport advancing in the audio thread.
 const REDRAW_INTERVAL: Duration = Duration::from_millis(33);
@@ -43,12 +43,17 @@ fn run(
 ) -> Result<()> {
     let mut keymap = Keymap::default();
     loop {
-        terminal.draw(|frame| osti_tui::render(frame, editor, playhead(editor, audio.as_ref())))?;
+        let size = terminal.size()?;
+        let viewport = Viewport::fit(size.width, size.height);
+
+        terminal.draw(|frame| {
+            osti_tui::render(frame, editor, playhead(editor, audio.as_ref()), &viewport);
+        })?;
 
         let Some(key) = osti_tui::next_event(REDRAW_INTERVAL)? else {
             continue;
         };
-        let Some(action) = keymap.feed(key, editor) else {
+        let Some(action) = keymap.feed(key, editor, &viewport) else {
             continue;
         };
         if action == Action::Quit {
