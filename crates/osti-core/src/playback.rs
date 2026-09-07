@@ -120,10 +120,10 @@ impl Playback {
                 } else {
                     let mut inverses: Vec<PlaybackAction> = removed
                         .into_iter()
-                        .map(|(position, length)| PlaybackAction::InsertNote {
+                        .map(|note| PlaybackAction::InsertNote {
                             track: *track,
-                            at: position,
-                            length,
+                            at: note.position,
+                            length: note.length,
                         })
                         .collect();
                     inverses.push(undo_insert);
@@ -166,14 +166,7 @@ impl Playback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pitch::Pitch;
-
-    fn at(tick: u16, pitch: u8) -> Position {
-        Position {
-            tick: Tick(tick),
-            pitch: Pitch(pitch),
-        }
-    }
+    use crate::test_support::at;
 
     #[test]
     fn inserting_a_note_undoes_to_removing_it() {

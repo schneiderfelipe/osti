@@ -20,5 +20,22 @@ pub use playback::{Playback, PlaybackAction, TrackId};
 pub use range::Range;
 pub use selection::Selection;
 pub use time::{Length, Tick};
-pub use track::{Position, Track};
+pub use track::{Note, Position, Track};
 pub use transport::{PlaybackIntent, Transport};
+
+/// Test-only helpers shared across this crate's own test modules, so a `Position` is built the
+/// same way everywhere instead of each module redefining an identical helper.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use crate::pitch::Pitch;
+    use crate::time::Tick;
+    use crate::track::Position;
+
+    /// A position at `tick`, `pitch`.
+    pub fn at(tick: u16, pitch: u8) -> Position {
+        Position {
+            tick: Tick(tick),
+            pitch: Pitch(pitch),
+        }
+    }
+}

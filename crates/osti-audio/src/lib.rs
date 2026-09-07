@@ -106,20 +106,19 @@ impl Player {
         for (index, track) in self.playback.tracks.iter().enumerate() {
             #[allow(clippy::cast_possible_truncation)] // realistically far fewer than 256 tracks
             let track_id = TrackId(index as u8);
-            for (position, _) in track.sounding_at(tick) {
+            for note in track.sounding_at(tick) {
+                let pitch = note.position.pitch;
                 if let Some(voice) = self
                     .voices
                     .iter_mut()
-                    .find(|voice| voice.track == track_id && voice.pitch == position.pitch)
+                    .find(|voice| voice.track == track_id && voice.pitch == pitch)
                 {
                     voice.target = 1.0;
                 } else {
                     self.voices.push(Voice {
                         track: track_id,
-                        pitch: position.pitch,
-                        tone: rate(self.sample_rate)
-                            .const_hz(position.pitch.frequency_hz())
-                            .sine(),
+                        pitch,
+                        tone: rate(self.sample_rate).const_hz(pitch.frequency_hz()).sine(),
                         level: 0.0,
                         target: 1.0,
                     });

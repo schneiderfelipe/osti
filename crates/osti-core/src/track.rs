@@ -14,6 +14,40 @@ pub struct Position {
     pub pitch: Pitch,
 }
 
+/// A placed note: where it starts, and how long it lasts.
+///
+/// What every query for a note actually in a [`Track`] hands back, rather than a bare
+/// `(Position, Length)` tuple — bundling the two together is what lets `end`/`covers` live in one
+/// place instead of every caller re-deriving "where does this note end" or "is it sounding at
+/// tick X" by hand from the pair.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Note {
+    /// Where it starts.
+    pub position: Position,
+    /// How long it lasts.
+    pub length: Length,
+}
+
+impl Note {
+    /// The last tick this note covers.
+    #[must_use]
+    pub fn end(self) -> Tick {
+        Tick(
+            self.position
+                .tick
+                .0
+                .saturating_add(u16::from(self.length.0))
+                .saturating_sub(1),
+        )
+    }
+
+    /// Whether this note's span covers `tick`.
+    #[must_use]
+    pub fn covers(self, tick: Tick) -> bool {
+        self.position.tick <= tick && tick <= self.end()
+    }
+}
+
 /// A sorted map from where each note starts to how long it lasts.
 ///
 /// The value only carries data about the note *other* than its pitch (currently just how long it
@@ -36,24 +70,24 @@ impl Track {
     }
 
     /// Every note whose span covers `tick`, at any pitch — zero, one, or several (a chord).
-    pub fn sounding_at(&self, tick: Tick) -> impl Iterator<Item = (Position, Length)> + '_ {
+    pub fn sounding_at(&self, tick: Tick) -> impl Iterator<Item = Note> + '_ {
         let window = window(tick, tick);
         self.notes
             .range(window)
-            .filter(move |&(&position, &length)| covers(position, length, tick))
-            .map(|(&position, &length)| (position, length))
+            .map(|(&position, &length)| Note { position, length })
+            .filter(move |note| note.covers(tick))
     }
 
     /// Every note at `pitch`, in tick order — the one row a selection ever moves along, so this
     /// is what note-boundary movement (jumping to the previous/next note, like Helix's word
     /// motions) and span-based edits (deleting everything a multi-tick selection covers) both
     /// build on.
-    pub fn notes_at_pitch(&self, pitch: Pitch) -> impl Iterator<Item = (Position, Length)> + '_ {
+    pub fn notes_at_pitch(&self, pitch: Pitch) -> impl Iterator<Item = Note> + '_ {
         // The map is sorted tick-first, so filtering to one pitch still yields ascending ticks.
         self.notes
             .iter()
             .filter(move |(position, _)| position.pitch == pitch)
-            .map(|(&position, &length)| (position, length))
+            .map(|(&position, &length)| Note { position, length })
     }
 
     /// The start of the nearest note at `pitch` starting before `tick`, if any.
@@ -64,7 +98,7 @@ impl Track {
     #[must_use]
     pub fn previous_note_start(&self, pitch: Pitch, tick: Tick) -> Option<Tick> {
         self.notes_at_pitch(pitch)
-            .map(|(position, _)| position.tick)
+            .map(|note| note.position.tick)
             .filter(|&start| start < tick)
             .max()
     }
@@ -74,14 +108,8 @@ impl Track {
     #[must_use]
     pub fn next_note_end(&self, pitch: Pitch, tick: Tick) -> Option<Tick> {
         self.notes_at_pitch(pitch)
-            .filter_map(|(position, length)| {
-                let end = position
-                    .tick
-                    .0
-                    .saturating_add(u16::from(length.0))
-                    .saturating_sub(1);
-                (end > tick.0).then_some(Tick(end))
-            })
+            .map(Note::end)
+            .filter(|&end| end > tick)
             .min()
     }
 
@@ -96,12 +124,12 @@ impl Track {
         end: Tick,
     ) -> impl Iterator<Item = Position> + '_ {
         self.notes_at_pitch(pitch)
-            .map(|(position, _)| position)
+            .map(|note| note.position)
             .filter(move |position| start <= position.tick && position.tick <= end)
     }
 
     /// Every note at `pitch` overlapping `[at, at + length)`.
-    fn overlapping(&self, pitch: Pitch, at: Tick, length: Length) -> Vec<(Position, Length)> {
+    fn overlapping(&self, pitch: Pitch, at: Tick, length: Length) -> Vec<Note> {
         let end = at.0.saturating_add(u16::from(length.0));
         // A candidate can start anywhere from `Length::MAX` ticks before `at` (any earlier and
         // even the longest possible note couldn't reach `at`) up to `end - 1` (any later and it
@@ -110,22 +138,20 @@ impl Track {
         let window = window(at, Tick(end.saturating_sub(1)));
         self.notes
             .range(window)
-            .filter(|&(&position, &len)| {
-                position.pitch == pitch
-                    && position.tick.0 < end
-                    && at.0 < position.tick.0.saturating_add(u16::from(len.0))
+            .map(|(&position, &length)| Note { position, length })
+            .filter(|note| {
+                note.position.pitch == pitch && note.position.tick.0 < end && at.0 <= note.end().0
             })
-            .map(|(&position, &length)| (position, length))
             .collect()
     }
 
     /// Place a note at `at`, removing (and returning) whatever same-pitch notes it overlaps —
     /// two notes of the same pitch sounding at once in one track isn't a sound, it's an
     /// undefined one; a chord is several *different* pitches, not overlapping copies of one.
-    pub(crate) fn insert(&mut self, at: Position, length: Length) -> Vec<(Position, Length)> {
+    pub(crate) fn insert(&mut self, at: Position, length: Length) -> Vec<Note> {
         let removed = self.overlapping(at.pitch, at.tick, length);
-        for (position, _) in &removed {
-            self.notes.remove(position);
+        for note in &removed {
+            self.notes.remove(&note.position);
         }
         self.notes.insert(at, length);
         removed
@@ -156,18 +182,15 @@ fn window(earliest_start: Tick, latest_start: Tick) -> std::ops::RangeInclusive<
     lower..=upper
 }
 
-fn covers(position: Position, length: Length, tick: Tick) -> bool {
-    position.tick <= tick && tick.0 < position.tick.0.saturating_add(u16::from(length.0))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::at;
 
-    fn at(tick: u16, pitch: u8) -> Position {
-        Position {
-            tick: Tick(tick),
-            pitch: Pitch(pitch),
+    fn note(tick: u16, pitch: u8, length: u8) -> Note {
+        Note {
+            position: at(tick, pitch),
+            length: Length(length),
         }
     }
 
@@ -202,7 +225,7 @@ mod tests {
 
         let removed = track.insert(at(2, 60), Length(2));
 
-        assert_eq!(removed, vec![(at(0, 60), Length(8))]);
+        assert_eq!(removed, vec![note(0, 60, 8)]);
         assert_eq!(track.sounding_at(Tick(0)).count(), 0); // the old note is gone
         assert_eq!(track.sounding_at(Tick(2)).count(), 1); // the new one took its place
     }
@@ -214,7 +237,7 @@ mod tests {
 
         let removed = track.insert(at(0, 60), Length(10));
 
-        assert_eq!(removed, vec![(at(5, 60), Length(2))]);
+        assert_eq!(removed, vec![note(5, 60, 2)]);
         assert_eq!(track.sounding_at(Tick(5)).count(), 1); // only the new, longer note remains
     }
 

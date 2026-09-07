@@ -13,36 +13,47 @@ pub use ratatui::DefaultTerminal;
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Clear, Paragraph},
 };
 
+/// Rows reserved above the grid, for the beat/step ruler (see `header`).
+const HEADER_ROWS: u16 = 2;
+
+/// Columns reserved to the left of the grid, for each row's label — a pitch name on a grid row,
+/// `"beat"`/`"step"` on the ruler above it (see `gutter`, which actually produces this width).
+const GUTTER_COLS: u16 = 5;
+
 /// The visible window of the grid: as many pitches and ticks as fit on screen, centered on A4.
 ///
 /// No scrolling yet — this is simply sized to the terminal, not bigger than it, recomputed every
-/// frame so a resize is reflected immediately.
+/// frame so a resize is reflected immediately. Callers outside this crate only ever construct one
+/// (`fit`) and hand it back to `render`/`Keymap::feed`; nothing outside needs to look inside, so
+/// the pitch/tick ranges themselves stay private.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Viewport {
     /// The pitch rows shown, high to low.
-    pub pitches: RangeInclusive<Pitch>,
+    pitches: RangeInclusive<Pitch>,
     /// The tick columns shown.
-    pub ticks: TickRange<Tick>,
+    ticks: TickRange<Tick>,
 }
 
 impl Viewport {
-    /// Fit as many rows and columns as `(width, height)` allows.
+    /// Fit as many rows and columns as `(width, height)` allows, once the ruler, gutter, and
+    /// status line's own space is set aside.
     #[must_use]
     pub fn fit(width: u16, height: u16) -> Self {
-        let rows = height.saturating_sub(1).max(1); // one row reserved for the status line
+        let rows = height.saturating_sub(HEADER_ROWS + 1).max(1); // + 1 for the status line
         #[allow(clippy::cast_possible_truncation)] // terminals aren't 256+ rows tall
         let rows = rows.min(u16::from(u8::MAX)) as u8;
         let half = rows / 2;
         let low = Pitch::A4.0.saturating_sub(half);
         let high = low.saturating_add(rows.saturating_sub(1));
+        let cols = width.saturating_sub(GUTTER_COLS).max(1);
         Self {
             pitches: Pitch(low)..=Pitch(high),
-            ticks: Tick(0)..Tick(width.max(1)),
+            ticks: Tick(0)..Tick(cols),
         }
     }
 }
@@ -63,18 +74,26 @@ pub fn restore() {
 
 /// Draw one frame.
 ///
-/// A grid of every visible pitch by tick, with the playhead and selection, a status line always
-/// showing the mode, and — in `Mode::Help` — a keybinding overlay on top of it all, the same way
-/// Helix's own help popups sit over the buffer rather than replacing it.
+/// A beat/step ruler above a grid of every visible pitch (labeled with its note name) by tick,
+/// with the playhead and selection shown within it and a currently-sounding note picked out in an
+/// accent color; a colored mode badge always shows the current mode, Helix-style; and — in
+/// `Mode::Help` — a keybinding overlay on top of everything, the same way Helix's own help popups
+/// sit over the buffer rather than replacing it.
 pub fn render(frame: &mut Frame<'_>, editor: &Editor, playhead: Tick, viewport: &Viewport) {
-    let [main_area, status_area] =
-        Layout::vertical([Constraint::Min(0), Constraint::Length(1)]).areas(frame.area());
+    let area = frame.area();
+    let [header_area, grid_area, status_area] = Layout::vertical([
+        Constraint::Length(HEADER_ROWS),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(area);
 
-    frame.render_widget(Paragraph::new(grid(editor, playhead, viewport)), main_area);
+    frame.render_widget(Paragraph::new(Vec::from(header(viewport))), header_area);
+    frame.render_widget(Paragraph::new(grid(editor, playhead, viewport)), grid_area);
     frame.render_widget(Paragraph::new(status_line(editor)), status_area);
 
     if editor.mode == Mode::Help {
-        render_help(frame, main_area);
+        render_help(frame, area);
     }
 }
 
@@ -84,8 +103,60 @@ const NOTE_START: &str = "▐";
 const NOTE_BODY: &str = "█";
 const EMPTY: &str = "·";
 
+/// The color a note is drawn in while it's actually sounding at the playhead — distinct from the
+/// playhead column marker (`Modifier::REVERSED`) itself, which marks *where* the transport is
+/// regardless of whether anything happens to be sounding there.
+const PLAYING_COLOR: Color = Color::LightGreen;
+
 /// The track this UI shows and edits — always the first one, until multi-track UI exists.
 const TRACK: TrackId = TrackId(0);
+
+/// A fixed-width label at the start of a row: a pitch name on a grid row, `"beat"`/`"step"` on
+/// the ruler above it. Right-aligned against one column of padding — the `4` here, plus that one
+/// column, is `GUTTER_COLS`.
+fn gutter(label: &str) -> Span<'static> {
+    Span::raw(format!("{label:>4} "))
+}
+
+/// One row: its gutter label, followed by one cell per visible tick — the shape shared by every
+/// row this crate draws, ruler and grid alike.
+fn row(label: &str, cells: impl Iterator<Item = Span<'static>>) -> Line<'static> {
+    Line::from(
+        std::iter::once(gutter(label))
+            .chain(cells)
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// Ticks per beat, and beats per bar — purely a display grouping for the ruler above the grid,
+/// not a real tempo/time-signature concept (there's no tempo model at all yet, see
+/// `osti_audio::TICK_SECS`'s own docs). Both stay single digits, so the ruler remains one
+/// character per tick, same as the grid below it.
+const STEPS_PER_BEAT: u16 = 4;
+const BEATS_PER_BAR: u16 = 4;
+
+/// The two-row ruler above the grid: which beat, and which step within it — read top to bottom,
+/// coarse to fine, the way a time signature itself is read.
+fn header(viewport: &Viewport) -> [Line<'static>; 2] {
+    let beat = ruler_row("beat", viewport, |tick| {
+        (tick.0 % STEPS_PER_BEAT == 0)
+            .then(|| (((tick.0 / STEPS_PER_BEAT) % BEATS_PER_BAR) + 1).to_string())
+    });
+    let step = ruler_row("step", viewport, |tick| {
+        Some(((tick.0 % STEPS_PER_BEAT) + 1).to_string())
+    });
+    [beat, step]
+}
+
+fn ruler_row(
+    label: &str,
+    viewport: &Viewport,
+    mut cell: impl FnMut(Tick) -> Option<String>,
+) -> Line<'static> {
+    let cells = (viewport.ticks.start.0..viewport.ticks.end.0)
+        .map(|raw_tick| Span::raw(cell(Tick(raw_tick)).unwrap_or_else(|| " ".to_string())));
+    row(label, cells)
+}
 
 fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'static>> {
     let track = editor.playback.track(TRACK);
@@ -95,44 +166,75 @@ fn grid(editor: &Editor, playhead: Tick, viewport: &Viewport) -> Vec<Line<'stati
         .rev()
         .map(|raw_pitch| {
             let pitch = Pitch(raw_pitch);
-            let spans = (viewport.ticks.start.0..viewport.ticks.end.0)
-                .map(|raw_tick| {
-                    let tick = Tick(raw_tick);
-                    let sounding = track
-                        .sounding_at(tick)
-                        .find(|(position, _)| position.pitch == pitch);
-                    let symbol = match sounding {
-                        Some((position, _)) if position.tick == tick => NOTE_START,
-                        Some(_) => NOTE_BODY,
-                        None => EMPTY,
-                    };
+            // At most one note per pitch can be sounding at any given tick (see `Track::insert`'s
+            // own docs), so there's at most one note here to highlight as "currently playing".
+            let playing = track
+                .sounding_at(playhead)
+                .find(|note| note.position.pitch == pitch);
+            let cells = (viewport.ticks.start.0..viewport.ticks.end.0).map(|raw_tick| {
+                let tick = Tick(raw_tick);
+                let sounding = track
+                    .sounding_at(tick)
+                    .find(|note| note.position.pitch == pitch);
+                let symbol = match sounding {
+                    Some(note) if note.position.tick == tick => NOTE_START,
+                    Some(_) => NOTE_BODY,
+                    None => EMPTY,
+                };
 
-                    let mut modifier = Modifier::empty();
-                    if tick == playhead {
-                        modifier |= Modifier::REVERSED;
-                    }
-                    if editor
-                        .selection
-                        .ranges()
-                        .any(|range| range.covers(Position { tick, pitch }))
-                    {
-                        modifier |= Modifier::UNDERLINED;
-                    }
-                    Span::styled(symbol, Style::default().add_modifier(modifier))
-                })
-                .collect::<Vec<_>>();
-            Line::from(spans)
+                let mut style = Style::default();
+                if playing.is_some_and(|note| note.covers(tick)) {
+                    style = style.fg(PLAYING_COLOR).add_modifier(Modifier::BOLD);
+                }
+                if tick == playhead {
+                    style = style.add_modifier(Modifier::REVERSED);
+                }
+                if editor
+                    .selection
+                    .ranges()
+                    .any(|range| range.covers(Position { tick, pitch }))
+                {
+                    style = style.add_modifier(Modifier::UNDERLINED);
+                }
+                Span::styled(symbol, style)
+            });
+            row(&pitch.name(), cells)
         })
         .collect()
 }
 
-fn status_line(editor: &Editor) -> String {
-    match editor.mode {
-        Mode::Normal => "NORMAL".to_string(),
-        Mode::Insert => "INSERT".to_string(),
-        Mode::Visual => "VISUAL".to_string(),
-        Mode::Help => "HELP".to_string(),
-        Mode::Command => format!(":{}", editor.command_line),
+/// The mode's own accent color, shown as the status line's badge background — the same idea as
+/// Helix's own colored mode indicator (not the same literal palette, which there depends on the
+/// active theme): one glance at the color says which mode you're in.
+const fn mode_color(mode: Mode) -> Color {
+    match mode {
+        Mode::Normal => Color::Blue,
+        Mode::Insert => Color::Green,
+        Mode::Visual => Color::Yellow,
+        Mode::Command => Color::Cyan,
+        Mode::Help => Color::Magenta,
+    }
+}
+
+fn status_line(editor: &Editor) -> Line<'static> {
+    let label = match editor.mode {
+        Mode::Normal => "NORMAL",
+        Mode::Insert => "INSERT",
+        Mode::Visual => "VISUAL",
+        Mode::Command => "COMMAND",
+        Mode::Help => "HELP",
+    };
+    let badge = Span::styled(
+        format!(" {label} "),
+        Style::default()
+            .fg(Color::Black)
+            .bg(mode_color(editor.mode))
+            .add_modifier(Modifier::BOLD),
+    );
+    if editor.mode == Mode::Command {
+        Line::from(vec![badge, Span::raw(format!(" :{}", editor.command_line))])
+    } else {
+        Line::from(badge)
     }
 }
 
@@ -648,9 +750,16 @@ mod tests {
     #[test]
     fn viewport_fits_the_given_size_centered_on_a4() {
         let viewport = Viewport::fit(16, 13);
-        assert_eq!(viewport.ticks, Tick(0)..Tick(16));
-        assert_eq!(viewport.pitches.start().0, Pitch::A4.0 - 6);
-        assert_eq!(viewport.pitches.end().0, Pitch::A4.0 + 5);
+        assert_eq!(viewport.ticks, Tick(0)..Tick(11)); // 16 - GUTTER_COLS
+        assert_eq!(viewport.pitches.start().0, Pitch::A4.0 - 5);
+        assert_eq!(viewport.pitches.end().0, Pitch::A4.0 + 4); // 13 - HEADER_ROWS - 1, 10 rows
+    }
+
+    /// Where a grid cell for `(tick, pitch)` lands in the rendered buffer, given `viewport`.
+    fn cell(viewport: &Viewport, tick: u16, pitch: Pitch) -> (u16, u16) {
+        let x = GUTTER_COLS + tick;
+        let y = HEADER_ROWS + u16::from(viewport.pitches.end().0 - pitch.0);
+        (x, y)
     }
 
     #[test]
@@ -664,19 +773,18 @@ mod tests {
             },
             length: osti_core::Length(3),
         }));
-        let viewport = Viewport::fit(8, 13);
-        let a4_row = u16::from(viewport.pitches.end().0 - Pitch::A4.0);
-        let mut terminal = Terminal::new(TestBackend::new(8, 13)).unwrap();
+        let viewport = Viewport::fit(13, 15); // same 8 ticks x 12 pitches as before the ruler/gutter
+        let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
         terminal
             .draw(|frame| render(frame, &editor, Tick(0), &viewport))
             .unwrap();
 
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(2, a4_row)].symbol(), NOTE_START);
-        assert_eq!(buffer[(3, a4_row)].symbol(), NOTE_BODY);
-        assert_eq!(buffer[(4, a4_row)].symbol(), NOTE_BODY);
-        assert_eq!(buffer[(5, a4_row)].symbol(), EMPTY);
+        assert_eq!(buffer[cell(&viewport, 2, Pitch::A4)].symbol(), NOTE_START);
+        assert_eq!(buffer[cell(&viewport, 3, Pitch::A4)].symbol(), NOTE_BODY);
+        assert_eq!(buffer[cell(&viewport, 4, Pitch::A4)].symbol(), NOTE_BODY);
+        assert_eq!(buffer[cell(&viewport, 5, Pitch::A4)].symbol(), EMPTY);
     }
 
     #[test]
@@ -698,9 +806,8 @@ mod tests {
             },
             length: osti_core::Length(2),
         }));
-        let viewport = Viewport::fit(8, 13);
-        let a4_row = u16::from(viewport.pitches.end().0 - Pitch::A4.0);
-        let mut terminal = Terminal::new(TestBackend::new(8, 13)).unwrap();
+        let viewport = Viewport::fit(13, 15);
+        let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
         terminal
             .draw(|frame| render(frame, &editor, Tick(10), &viewport)) // playhead elsewhere
@@ -709,10 +816,81 @@ mod tests {
         let buffer = terminal.backend().buffer();
         assert_eq!(
             (0..4)
-                .map(|x| buffer[(x, a4_row)].symbol())
+                .map(|tick| buffer[cell(&viewport, tick, Pitch::A4)].symbol())
                 .collect::<Vec<_>>(),
             vec![NOTE_START, NOTE_BODY, NOTE_START, NOTE_BODY],
         );
+    }
+
+    #[test]
+    fn a_sounding_note_is_highlighted_at_the_playhead_but_not_elsewhere() {
+        let mut editor = Editor::new();
+        editor.update(Action::Playback(PlaybackAction::InsertNote {
+            track: TrackId(0),
+            at: osti_core::Position {
+                tick: Tick(2),
+                pitch: Pitch::A4,
+            },
+            length: osti_core::Length(3),
+        }));
+        let viewport = Viewport::fit(13, 15);
+        let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, &editor, Tick(3), &viewport)) // inside the note's span
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[cell(&viewport, 2, Pitch::A4)].fg, PLAYING_COLOR);
+        assert_eq!(buffer[cell(&viewport, 4, Pitch::A4)].fg, PLAYING_COLOR);
+        assert_ne!(buffer[cell(&viewport, 7, Pitch::A4)].fg, PLAYING_COLOR); // outside the note
+
+        // A different, silent pitch at the very same tick is never highlighted just because the
+        // playhead is passing through its column.
+        let other_pitch = Pitch(Pitch::A4.0 - 1);
+        assert_ne!(buffer[cell(&viewport, 3, other_pitch)].fg, PLAYING_COLOR);
+    }
+
+    #[test]
+    fn the_gutter_shows_each_row_its_own_pitch_name() {
+        let editor = Editor::new();
+        let viewport = Viewport::fit(13, 15);
+        let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, &editor, Tick(0), &viewport))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let (_, a4_row) = cell(&viewport, 0, Pitch::A4);
+        let label: String = (0..GUTTER_COLS)
+            .map(|x| buffer[(x, a4_row)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert_eq!(label.trim(), "A4");
+    }
+
+    #[test]
+    fn the_ruler_counts_steps_within_each_beat() {
+        let editor = Editor::new();
+        let viewport = Viewport::fit(13, 15);
+        let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
+
+        terminal
+            .draw(|frame| render(frame, &editor, Tick(0), &viewport))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let step_row = HEADER_ROWS - 1;
+        let steps: String = (0..4)
+            .map(|tick| {
+                buffer[(GUTTER_COLS + tick, step_row)]
+                    .symbol()
+                    .chars()
+                    .next()
+                    .unwrap_or(' ')
+            })
+            .collect();
+        assert_eq!(steps, "1234");
     }
 
     #[test]
