@@ -11,7 +11,7 @@ Non-interactive use, like rendering a composition to an audio file from the comm
 ## Limited scope
 
 `osti` is a sequencer with looper features.
-It should be very good at writing note patterns, looping them, and playing simple synthesized instruments over them.
+It should be very good at writing tracks, looping them, and playing simple synthesized instruments over them.
 Being merely adequate at deep sound design or professional mixing is an acceptable trade for staying sharp at that core job.
 
 ## Composability

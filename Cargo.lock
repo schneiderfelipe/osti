@@ -1146,6 +1146,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "nonempty"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9737e026353e5cd0736f98eddae28665118eb6f6600902a7f50db585621fecb6"
+
+[[package]]
 name = "num-conv"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1324,28 +1330,39 @@ dependencies = [
 
 [[package]]
 name = "osti"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "color-eyre",
  "osti-audio",
+ "osti-core",
  "osti-tui",
 ]
 
 [[package]]
 name = "osti-audio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "dasp_signal",
+ "osti-core",
+ "rtrb",
  "thiserror 2.0.20",
 ]
 
 [[package]]
+name = "osti-core"
+version = "0.3.0"
+dependencies = [
+ "nonempty",
+]
+
+[[package]]
 name = "osti-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossterm",
+ "osti-core",
  "ratatui",
 ]
 
@@ -1721,6 +1738,12 @@ name = "regex-syntax"
 version = "0.8.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+
+[[package]]
+name = "rtrb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278fb35b3e730abe136e9b395b5b81b96d06b9f5478a50f0c8430a2237b22de"
 
 [[package]]
 name = "rustc-demangle"
