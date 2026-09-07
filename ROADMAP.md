@@ -22,11 +22,11 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ### Composing
 
-- [ ] Show a grid of notes and time for one pattern
-- [ ] Move a selection around the grid
-- [ ] Add and remove notes at the current selection
+- [x] Show a grid of notes and time for one pattern
+- [x] Move a selection around the grid
+- [x] Add and remove notes at the current selection
 - [ ] Change a selected note's pitch and duration
-- [ ] Select and edit more than one note at once
+- [x] Select and edit more than one note at once
 
 ### Tracks
 
@@ -36,19 +36,19 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ### Playback and looping
 
-- [ ] Play, pause, and seek without leaving the keyboard
+- [x] Play, pause, and seek without leaving the keyboard
 - [ ] Loop a pattern continuously
 - [ ] Change where a loop starts and ends
 
 ### Instruments
 
-- [ ] Play notes through one simple synthesized instrument
+- [x] Play notes through one simple synthesized instrument
 - [ ] Choose which instrument a track uses
 - [ ] Add a second, differently-voiced instrument
 
 ### Command line
 
-- [ ] Open a command line for non-editing operations
+- [x] Open a command line for non-editing operations
 - [ ] Save a composition to a file
 - [ ] Load a composition from a file
 - [ ] Open a specific track by name
@@ -56,9 +56,9 @@ This document describes what "done" looks like for a first, minimal version of `
 
 ### Undo
 
-- [ ] Undo the most recent edit
-- [ ] Redo an undone edit
-- [ ] Undo and redo across a run of edits
+- [x] Undo the most recent edit
+- [x] Redo an undone edit
+- [x] Undo and redo across a run of edits
 
 ## Beyond MVP
 

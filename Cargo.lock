@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "osti"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "color-eyre",
@@ -1341,7 +1341,7 @@ dependencies = [
 
 [[package]]
 name = "osti-audio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cpal",
  "dasp_signal",
@@ -1352,14 +1352,14 @@ dependencies = [
 
 [[package]]
 name = "osti-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "nonempty",
 ]
 
 [[package]]
 name = "osti-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "crossterm",
  "osti-core",
