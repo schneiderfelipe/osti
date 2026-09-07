@@ -13,11 +13,11 @@ use osti_core::{
 };
 pub use ratatui::DefaultTerminal;
 use ratatui::{
-    Frame,
+    buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph, Widget},
 };
 
 /// Rows reserved above the grid, for the beat/step ruler (see `header`).
@@ -31,7 +31,7 @@ const GUTTER_COLS: u16 = 5;
 ///
 /// No scrolling yet — this is simply sized to the terminal, not bigger than it, recomputed every
 /// frame so a resize is reflected immediately. Callers outside this crate only ever construct one
-/// (`fit`) and hand it back to `render`/`Keymap::feed`; nothing outside needs to look inside, so
+/// (`fit`) and hand it back to [`Screen`]/`Keymap::feed`; nothing outside needs to look inside, so
 /// the pitch/tick ranges themselves stay private.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Viewport {
@@ -74,28 +74,45 @@ pub fn restore() {
     ratatui::restore();
 }
 
-/// Draw one frame.
+/// Everything one frame needs to draw.
 ///
-/// A beat/step ruler above a grid of every visible pitch (labeled with its note name) by tick,
-/// with the playhead and selection shown within it and a currently-sounding note picked out in an
-/// accent color; a colored mode badge always shows the current mode, Helix-style; and — in
-/// `Mode::Help` — a keybinding overlay on top of everything, the same way Helix's own help popups
-/// sit over the buffer rather than replacing it.
-pub fn render(frame: &mut Frame<'_>, editor: &Editor, playhead: Tick, viewport: &Viewport) {
-    let area = frame.area();
-    let [header_area, grid_area, status_area] = Layout::vertical([
-        Constraint::Length(HEADER_ROWS),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+/// The editor, where the playhead actually is (see `osti`'s own `playhead` function for why
+/// that's not simply `editor.playback.transport.position`), and the current viewport. A plain
+/// [`Widget`], not a `StatefulWidget` — there's no state here that ratatui itself would need to
+/// own and hand back to redraw correctly next frame. `Editor` already *is* that state, held by
+/// the caller across the whole run loop; `Viewport` is cheap enough to recompute fresh every
+/// frame (see its own docs) rather than track incrementally.
+#[derive(Debug)]
+pub struct Screen<'a> {
+    /// The editing session to draw.
+    pub editor: &'a Editor,
+    /// Where to draw the playhead.
+    pub playhead: Tick,
+    /// The visible window of the grid.
+    pub viewport: &'a Viewport,
+}
 
-    frame.render_widget(Paragraph::new(Vec::from(header(viewport))), header_area);
-    frame.render_widget(Paragraph::new(grid(editor, playhead, viewport)), grid_area);
-    frame.render_widget(Paragraph::new(status_line(editor)), status_area);
+impl Widget for Screen<'_> {
+    /// A beat/step ruler above a grid of every visible pitch (labeled with its note name) by
+    /// tick, with the playhead and selection shown within it and a currently-sounding note picked
+    /// out in an accent color; a colored mode badge always shows the current mode, Helix-style;
+    /// and — in `Mode::Help` — a keybinding overlay on top of everything, the same way Helix's own
+    /// help popups sit over the buffer rather than replacing it.
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let [header_area, grid_area, status_area] = Layout::vertical([
+            Constraint::Length(HEADER_ROWS),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
-    if editor.mode == Mode::Help {
-        render_help(frame, area);
+        Paragraph::new(Vec::from(header(self.viewport))).render(header_area, buf);
+        Paragraph::new(grid(self.editor, self.playhead, self.viewport)).render(grid_area, buf);
+        Paragraph::new(status_line(self.editor)).render(status_area, buf);
+
+        if self.editor.mode == Mode::Help {
+            render_help(area, buf);
+        }
     }
 }
 
@@ -259,7 +276,7 @@ fn status_line(editor: &Editor) -> Line<'static> {
 /// Build the help overlay's content — computed from the same `Command` tables that drive
 /// dispatch, not a separately maintained wall of text that could drift out of sync with the real
 /// bindings.
-fn render_help(frame: &mut Frame<'_>, over: Rect) {
+fn render_help(over: Rect, buf: &mut Buffer) {
     let mut lines = vec![Line::from("")];
     for (title, commands) in [
         ("Normal", NORMAL),
@@ -293,11 +310,10 @@ fn render_help(frame: &mut Frame<'_>, over: Rect) {
     let height = lines.len() as u16 + 2;
     let area = centered(over, width, height);
 
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" osti — keybindings ")),
-        area,
-    );
+    Clear.render(area, buf);
+    Paragraph::new(lines)
+        .block(Block::bordered().title(" osti — keybindings "))
+        .render(area, buf);
 }
 
 fn keys_label(command: Command) -> String {
@@ -765,6 +781,27 @@ mod tests {
         keymap.feed(KeyEvent::from(code), editor, &viewport)
     }
 
+    /// Render `editor` into `terminal`, at `playhead`, for a test to inspect the resulting buffer.
+    fn draw(
+        terminal: &mut Terminal<TestBackend>,
+        editor: &Editor,
+        playhead: Tick,
+        viewport: &Viewport,
+    ) {
+        terminal
+            .draw(|frame| {
+                frame.render_widget(
+                    Screen {
+                        editor,
+                        playhead,
+                        viewport,
+                    },
+                    frame.area(),
+                );
+            })
+            .unwrap();
+    }
+
     #[test]
     fn viewport_fits_the_given_size_centered_on_a4() {
         let viewport = Viewport::fit(16, 13);
@@ -795,9 +832,7 @@ mod tests {
         let viewport = Viewport::fit(13, 15); // same 8 ticks x 12 pitches as before the ruler/gutter
         let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
-        terminal
-            .draw(|frame| render(frame, &editor, Tick(0), &viewport))
-            .unwrap();
+        draw(&mut terminal, &editor, Tick(0), &viewport);
 
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[cell(&viewport, 2, Pitch::A4)].symbol(), NOTE_START);
@@ -828,9 +863,7 @@ mod tests {
         let viewport = Viewport::fit(13, 15);
         let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
-        terminal
-            .draw(|frame| render(frame, &editor, Tick(10), &viewport)) // playhead elsewhere
-            .unwrap();
+        draw(&mut terminal, &editor, Tick(10), &viewport); // playhead elsewhere
 
         let buffer = terminal.backend().buffer();
         assert_eq!(
@@ -855,9 +888,7 @@ mod tests {
         let viewport = Viewport::fit(13, 15);
         let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
-        terminal
-            .draw(|frame| render(frame, &editor, Tick(3), &viewport)) // inside the note's span
-            .unwrap();
+        draw(&mut terminal, &editor, Tick(3), &viewport); // inside the note's span
 
         let buffer = terminal.backend().buffer();
         assert_eq!(buffer[cell(&viewport, 2, Pitch::A4)].fg, PLAYING_COLOR);
@@ -876,9 +907,7 @@ mod tests {
         let viewport = Viewport::fit(13, 15);
         let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
-        terminal
-            .draw(|frame| render(frame, &editor, Tick(0), &viewport))
-            .unwrap();
+        draw(&mut terminal, &editor, Tick(0), &viewport);
 
         let buffer = terminal.backend().buffer();
         let (_, a4_row) = cell(&viewport, 0, Pitch::A4);
@@ -894,9 +923,7 @@ mod tests {
         let viewport = Viewport::fit(13, 15);
         let mut terminal = Terminal::new(TestBackend::new(13, 15)).unwrap();
 
-        terminal
-            .draw(|frame| render(frame, &editor, Tick(0), &viewport))
-            .unwrap();
+        draw(&mut terminal, &editor, Tick(0), &viewport);
 
         let buffer = terminal.backend().buffer();
         let step_row = HEADER_ROWS - 1;
